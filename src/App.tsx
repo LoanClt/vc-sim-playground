@@ -270,14 +270,6 @@ function App() {
           </div>
         </div>
         
-        <a href="https://atas.vc/" target="_blank" rel="noopener noreferrer">
-          <img
-            src="https://atas.vc/img/logo.png"
-            width="150"
-            alt="Atas VC"
-            className="mb-2"
-          />
-        </a>
         <p className="text-sm text-gray-500 mb-4">
           Simulation developed by{" "}
           <a
