@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './components/ui/tabs';
 import { Slider } from './components/ui/slider';
 import { Bar, BarChart, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, Cell } from 'recharts';
@@ -8,6 +8,8 @@ import { FileDown, FileUp, Sparkles } from 'lucide-react';
 import { toast, Toaster } from 'sonner';
 import { cn } from './lib/utils';
 import { useVCFundStore } from './lib/store';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from './components/ui/dialog';
+import { Input } from './components/ui/input';
 
 // Import components
 import { FundParameters } from './components/fund-parameters';
@@ -41,13 +43,25 @@ function App() {
     portfolioSimulationResults,
     portfolioCompanies,
     savePortfolio,
-    loadPortfolio
+    loadPortfolio,
+    exitValuations,
+    lossProbabilities,
+    updateExitValuation,
+    updateLossProbability,
+    dilution,
+    updateDilution
   } = useVCFundStore();
 
   // Define stages
   const stages = ["Pre-Seed", "Seed", "Series A", "Series B"];
   const stageIndex = stages.indexOf(initialStage);
   const validStages = stages.slice(stageIndex);
+
+  // State for selected simulation
+  const [selectedSim, setSelectedSim] = useState(1);
+  const [portfolioUnlocked, setPortfolioUnlocked] = useState(false);
+  const [showPasswordDialog, setShowPasswordDialog] = useState(false);
+  const [passwordInput, setPasswordInput] = useState("");
 
   // Handle portfolio import
   const handleImportClick = () => {
@@ -247,7 +261,13 @@ function App() {
             </Button>
             <Button 
               variant={isPortfolioMode ? "default" : "outline"} 
-              onClick={() => setIsPortfolioMode(true)}
+              onClick={() => {
+                if (portfolioUnlocked) {
+                  setIsPortfolioMode(true);
+                } else {
+                  setShowPasswordDialog(true);
+                }
+              }}
               className={cn(
                 "px-6",
                 isPortfolioMode && "shadow-sm"
@@ -328,31 +348,33 @@ function App() {
             <div>
               <Tabs defaultValue="portfolio">
                 <div className="flex justify-between items-center mb-4">
-                  <TabsList className="grid grid-cols-2">
-                    <TabsTrigger value="portfolio">Portfolio</TabsTrigger>
-                    <TabsTrigger value="progress">Progress</TabsTrigger>
-                  </TabsList>
-                  
-                  <div className="flex gap-2">
-                    <Button 
-                      variant="outline" 
-                      size="sm" 
-                      className="flex items-center gap-1"
-                      onClick={handleImportClick}
-                    >
-                      <FileUp className="h-4 w-4" />
-                      Import
-                    </Button>
-                    <Button 
-                      variant="outline" 
-                      size="sm" 
-                      className="flex items-center gap-1"
-                      onClick={handleExportClick}
-                      disabled={portfolioCompanies.length === 0}
-                    >
-                      <FileDown className="h-4 w-4" />
-                      Export
-                    </Button>
+                  <div className="flex flex-col w-full">
+                    <TabsList className="grid grid-cols-3 mb-2">
+                      <TabsTrigger value="portfolio">Portfolio</TabsTrigger>
+                      <TabsTrigger value="valuations">Valuations</TabsTrigger>
+                      <TabsTrigger value="progress">Progress</TabsTrigger>
+                    </TabsList>
+                    <div className="flex flex-col gap-2 w-full">
+                      <Button 
+                        variant="outline" 
+                        size="sm" 
+                        className="flex items-center gap-1 w-full"
+                        onClick={handleImportClick}
+                      >
+                        <FileUp className="h-4 w-4" />
+                        Import
+                      </Button>
+                      <Button 
+                        variant="outline" 
+                        size="sm" 
+                        className="flex items-center gap-1 w-full"
+                        onClick={handleExportClick}
+                        disabled={portfolioCompanies.length === 0}
+                      >
+                        <FileDown className="h-4 w-4" />
+                        Export
+                      </Button>
+                    </div>
                   </div>
                 </div>
 
@@ -362,56 +384,180 @@ function App() {
                     <p className="text-sm text-gray-500">
                       Add your portfolio companies to simulate their growth
                     </p>
-                    
-                    {/* Portfolio management component */}
                     <PortfolioManager />
                   </div>
                 </TabsContent>
-                
+
+                <TabsContent value="valuations">
+                  <div className="space-y-4">
+                    <h2 className="text-lg font-semibold">Valuations & Parameters</h2>
+                    <p className="text-sm text-gray-500">
+                      Set dilution, exit valuation, and loss probability for each stage. These parameters apply to all companies at that stage.
+                    </p>
+                    {stages.map((stage, i) => {
+                      if (stage === "Series C") return null;
+                      const nextStage = stages[i + 1] || null;
+                      const dilutionKey = nextStage ? `${stage} to ${nextStage}` : null;
+                      const dilutionVal = (dilutionKey && dilution[dilutionKey]) ? dilution[dilutionKey] : [10, 25];
+                      const exitVal = exitValuations[stage] || [4, 10];
+                      const lossProb = lossProbabilities[stage] ?? 30;
+                      return (
+                        <div key={stage} className="space-y-3 mt-4">
+                          <div className="flex items-center gap-2">
+                            <StageBadge stage={stage} />
+                            <h3 className="text-md font-medium">{stage}</h3>
+                          </div>
+                          {dilutionKey && (
+                            <div className="space-y-1">
+                              <div className="flex justify-between">
+                                <label className="text-sm font-medium">Dilution {stage} → {nextStage} (%)</label>
+                                <span className="text-sm font-medium">{dilutionVal[0]}-{dilutionVal[1]}</span>
+                              </div>
+                              <Slider
+                                value={dilutionVal}
+                                min={0}
+                                max={100}
+                                step={1}
+                                onValueChange={(values) => {
+                                  if (dilutionKey && values.length === 2) updateDilution(dilutionKey, [values[0], values[1]]);
+                                }}
+                              />
+                            </div>
+                          )}
+                          {stage === "Series B" && (
+                            <div className="space-y-1">
+                              <div className="flex justify-between">
+                                <label className="text-sm font-medium">Dilution Series B → Series C (%)</label>
+                                <span className="text-sm font-medium">{(dilution["Series B to Series C"] || [10, 15]).join('-')}</span>
+                              </div>
+                              <Slider
+                                value={dilution["Series B to Series C"] || [10, 15]}
+                                min={0}
+                                max={100}
+                                step={1}
+                                onValueChange={(values) => {
+                                  if (values.length === 2) updateDilution("Series B to Series C", [values[0], values[1]]);
+                                }}
+                              />
+                            </div>
+                          )}
+                          <div className="space-y-1">
+                            <div className="flex justify-between">
+                              <label className="text-sm font-medium">Exit Valuation Range ($MM)</label>
+                              <span className="text-sm font-medium">{exitVal[0]}-{exitVal[1]}</span>
+                            </div>
+                            <Slider
+                              value={exitVal}
+                              min={2}
+                              max={100}
+                              step={1}
+                              onValueChange={(values) => {
+                                if (values.length === 2) updateExitValuation(stage, [values[0], values[1]]);
+                              }}
+                            />
+                          </div>
+                          <div className="space-y-1">
+                            <div className="flex justify-between">
+                              <label className="text-sm font-medium">Probability of Total Loss at {stage} (%)</label>
+                              <span className="text-sm font-medium">{lossProb}%</span>
+                            </div>
+                            <Slider
+                              value={[lossProb]}
+                              min={0}
+                              max={100}
+                              step={1}
+                              onValueChange={(values) => updateLossProbability(stage, values[0])}
+                            />
+                          </div>
+                        </div>
+                      );
+                    })}
+                    {/* Add Series C section */}
+                    <div className="space-y-3 mt-4">
+                      <div className="flex items-center gap-2">
+                        <StageBadge stage="Series C" />
+                        <h3 className="text-md font-medium">Series C</h3>
+                      </div>
+                      <div className="space-y-1">
+                        <div className="flex justify-between">
+                          <label className="text-sm font-medium">Dilution Series C → Series IPO (%)</label>
+                          <span className="text-sm font-medium">{(dilution["Series C to IPO"] || [10, 15]).join('-')}</span>
+                        </div>
+                        <Slider
+                          value={dilution["Series C to IPO"] || [10, 15]}
+                          min={0}
+                          max={100}
+                          step={1}
+                          onValueChange={(values) => {
+                            if (values.length === 2) updateDilution("Series C to IPO", [values[0], values[1]]);
+                          }}
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <div className="flex justify-between">
+                          <label className="text-sm font-medium">Exit Valuation Range ($MM)</label>
+                          <span className="text-sm font-medium">{(exitValuations["Series C"] || [100, 1000]).join('-')}</span>
+                        </div>
+                        <Slider
+                          value={exitValuations["Series C"] || [100, 1000]}
+                          min={10}
+                          max={2000}
+                          step={1}
+                          onValueChange={(values) => {
+                            if (values.length === 2) updateExitValuation("Series C", [values[0], values[1]]);
+                          }}
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <div className="flex justify-between">
+                          <label className="text-sm font-medium">Probability of Total Loss at Series C (%)</label>
+                          <span className="text-sm font-medium">{lossProbabilities["Series C"] ?? 30}%</span>
+                        </div>
+                        <Slider
+                          value={[lossProbabilities["Series C"] ?? 30]}
+                          min={0}
+                          max={100}
+                          step={1}
+                          onValueChange={(values) => updateLossProbability("Series C", values[0])}
+                        />
+                      </div>
+                    </div>
+                  </div>
+                </TabsContent>
+
                 <TabsContent value="progress">
                   <div className="space-y-4">
                     <h2 className="text-lg font-semibold">Stage Progression</h2>
                     <p className="text-sm text-gray-500">
                       Configure probabilities of companies advancing to next stages
                     </p>
-
-                    {/* Market Data Presets Component */}
                     <ProgressionPresets />
-
-                    {/* Progression probabilities */}
-                    {
-                      [
-                        "Pre-Seed to Seed",
-                        "Seed to Series A",
-                        "Series A to Series B",
-                        "Series B to Series C",
-                        "Series C to IPO",
-                      ].map((key) => {
-                        const probability = probAdvancement[key] || 0;
-
-                        return (
-                          <div key={key} className="space-y-1">
-                            <div className="flex justify-between">
-                              <label className="text-sm font-medium">
-                                {key.replace(" to ", " → ")}
-                              </label>
-                              <span className="text-sm font-medium">{probability}%</span>
-                            </div>
-                            <Slider
-                              value={[probability]}
-                              min={0}
-                              max={100}
-                              step={1}
-                              onValueChange={(values) =>
-                                handleProbabilityChange(key, values)
-                              }
-                            />
+                    {[
+                      "Pre-Seed to Seed",
+                      "Seed to Series A",
+                      "Series A to Series B",
+                      "Series B to Series C",
+                      "Series C to IPO",
+                    ].map((key) => {
+                      const probability = probAdvancement[key] || 0;
+                      return (
+                        <div key={key} className="space-y-1">
+                          <div className="flex justify-between">
+                            <label className="text-sm font-medium">
+                              {key.replace(" to ", " → ")}
+                            </label>
+                            <span className="text-sm font-medium">{probability}%</span>
                           </div>
-                        );
-                      })
-                    }
-                    
-                    {/* Data Sources Information */}
+                          <Slider
+                            value={[probability]}
+                            min={0}
+                            max={100}
+                            step={1}
+                            onValueChange={(values) => handleProbabilityChange(key, values)}
+                          />
+                        </div>
+                      );
+                    })}
                     <ProgressionSourcesInfo />
                   </div>
                 </TabsContent>
@@ -480,16 +626,25 @@ function App() {
               <TabsContent value="valuations" className="space-y-4">
                 <h2 className="text-lg font-semibold">Valuations & Check Sizes</h2>
                 <p className="text-sm text-gray-500">
-                  Configure entry valuations and check sizes for each stage
+                  Configure entry valuations, check sizes, dilution, exit valuations, and loss probabilities for each stage
                 </p>
 
-                {validStages.map((stage) => {
+                {validStages.map((stage, i) => {
                   const valuation = valuations[stage] || [1, 10];
                   const checkSize = checkSizes[stage] || [0.5, 2];
+                  const exitVal = exitValuations[stage] || [1, 10];
+                  const lossProb = lossProbabilities[stage] ?? 30;
+                  // For dilution, get the transition to the next stage
+                  const nextStage = validStages[i + 1] || (stage === "Series B" ? "Series C" : null);
+                  const dilutionKey = nextStage ? `${stage} to ${nextStage}` : null;
+                  const dilutionVal = (dilutionKey && dilution[dilutionKey]) ? dilution[dilutionKey] : [10, 25];
 
                   return (
                     <div key={stage} className="space-y-3 mt-4">
-                      <h3 className="text-md font-medium">{stage}</h3>
+                      <div className="flex items-center gap-2">
+                        <StageBadge stage={stage} />
+                        <h3 className="text-md font-medium">{stage}</h3>
+                      </div>
 
                       <div className="space-y-1">
                         <div className="flex justify-between">
@@ -556,6 +711,87 @@ function App() {
                           onValueChange={(values) =>
                             handleCheckSizeChange(stage, values)
                           }
+                        />
+                      </div>
+
+                      {/* Dilution per round (if not last stage) */}
+                      {dilutionKey && Array.isArray(dilutionVal) && dilutionVal.length === 2 && (
+                        <div className="space-y-1">
+                          <div className="flex justify-between">
+                            <label className="text-sm font-medium">Dilution {stage} → {nextStage} (%)</label>
+                            <span className="text-sm font-medium">{dilutionVal[0]}-{dilutionVal[1]}</span>
+                          </div>
+                          <Slider
+                            value={dilutionVal}
+                            min={0}
+                            max={100}
+                            step={1}
+                            onValueChange={(values) => {
+                              const [min, max] = values;
+                              if (dilutionKey && typeof min === 'number' && typeof max === 'number') {
+                                updateDilution(dilutionKey, [min, max]);
+                              }
+                            }}
+                          />
+                        </div>
+                      )}
+
+                      {/* Exit Valuation Range */}
+                      <div className="space-y-1">
+                        <div className="flex justify-between">
+                          <label className="text-sm font-medium">Exit Valuation Range ($MM)</label>
+                          <span className="text-sm font-medium">{exitVal[0]}-{exitVal[1]}</span>
+                        </div>
+                        <Slider
+                          value={exitVal}
+                          min={
+                            stage === "Pre-Seed"
+                              ? 2
+                              : stage === "Seed"
+                              ? 2
+                              : stage === "Series A"
+                              ? 10
+                              : stage === "Series B"
+                              ? 20
+                              : stage === "Series C"
+                              ? 100
+                              : 1000
+                          }
+                          max={
+                            stage === "Pre-Seed"
+                              ? 20
+                              : stage === "Seed"
+                              ? 40
+                              : stage === "Series A"
+                              ? 100
+                              : stage === "Series B"
+                              ? 200
+                              : stage === "Series C"
+                              ? 1000
+                              : 10000
+                          }
+                          step={stage === "IPO" ? 100 : stage === "Series C" ? 10 : 1}
+                          onValueChange={(values) => {
+                            const [min, max] = values;
+                            if (typeof min === 'number' && typeof max === 'number') {
+                              updateExitValuation(stage, [min, max]);
+                            }
+                          }}
+                        />
+                      </div>
+
+                      {/* Loss Probability */}
+                      <div className="space-y-1">
+                        <div className="flex justify-between">
+                          <label className="text-sm font-medium">Probability of Total Loss at {stage} (%)</label>
+                          <span className="text-sm font-medium">{lossProb}%</span>
+                        </div>
+                        <Slider
+                          value={[lossProb]}
+                          min={0}
+                          max={100}
+                          step={1}
+                          onValueChange={(values) => updateLossProbability(stage, values[0])}
                         />
                       </div>
                     </div>
@@ -729,26 +965,60 @@ function App() {
 
               {/* Investment Performance */}
               <div>
-                <h3 className="text-lg font-semibold mb-2">
-                  Entry Capital vs. Exit Value per Investment
-                </h3>
+                <div className="flex items-center mb-2 gap-4">
+                  <h3 className="text-lg font-semibold">
+                    Entry Capital vs. Exit Value per Investment (Simulation Details)
+                  </h3>
+                  <div className="flex items-center gap-2">
+                    <label htmlFor="sim-select" className="text-sm">Simulation:</label>
+                    <select
+                      id="sim-select"
+                      className="border rounded px-2 py-1 text-sm"
+                      value={selectedSim}
+                      onChange={e => setSelectedSim(Number(e.target.value))}
+                    >
+                      {Array.from({ length: useVCFundStore.getState().numSimulations }, (_, i) => (
+                        <option key={i + 1} value={i + 1}>{i + 1}</option>
+                      ))}
+                    </select>
+                  </div>
+                </div>
                 <div className="min-h-[300px] w-full">
                   <ResponsiveContainer width="100%" height={300}>
                     <BarChart
-                      data={results.investments.map((inv) => ({
-                        id: inv.id,
-                        entry: inv.entryAmount,
-                        exit: inv.exitAmount,
-                        gain: Math.max(0, inv.exitAmount - inv.entryAmount),
-                        loss: Math.min(0, inv.exitAmount - inv.entryAmount),
-                      }))}
+                      data={(() => {
+                        // Group investments by simulation
+                        const simMap = new Map();
+                        results.investments.forEach(inv => {
+                          const parts = String(inv.id).split('-');
+                          const simIdx = parts[0] ? parseInt(parts[0], 10) : 1;
+                          if (!simMap.has(simIdx)) simMap.set(simIdx, []);
+                          simMap.get(simIdx).push(inv);
+                        });
+                        // Only show up to floor(numInvestments)
+                        const numToShow = Math.floor(results.numInvestments);
+                        const invs = simMap.get(selectedSim) || [];
+                        // For portfolio mode, build a map from company id to name
+                        let companyNameMap: Record<string, string> = {};
+                        if (isPortfolioMode) {
+                          const pcs = useVCFundStore.getState().portfolioCompanies;
+                          pcs.forEach(pc => { companyNameMap[String(pc.id)] = pc.name; });
+                        }
+                        return invs.slice(0, numToShow).map((inv, idx) => ({
+                          id: idx + 1,
+                          entry: inv.entryAmount,
+                          exit: inv.exitAmount,
+                          gain: Math.max(0, inv.exitAmount - inv.entryAmount),
+                          loss: Math.min(0, inv.exitAmount - inv.entryAmount),
+                        }));
+                      })()}
                     >
                       <CartesianGrid strokeDasharray="3 3" />
                       <XAxis dataKey="id" />
                       <YAxis />
                       <Tooltip />
                       <Legend />
-                      <Bar dataKey="entry" fill="#8884d8" name="Initial Investment" />
+                      <Bar dataKey="entry" fill="#8884d8" name="Entry" />
                       <Bar dataKey="gain" fill="#82ca9d" name="Gain" stackId="stack" />
                       <Bar dataKey="loss" fill="#ff8042" name="Loss" stackId="stack" />
                     </BarChart>
@@ -759,14 +1029,14 @@ function App() {
               {/* Investments Table */}
               <div>
                 <h3 className="text-lg font-semibold mb-2">
-                  {isPortfolioMode ? "Portfolio Companies Simulation" : "Sample Simulation Investments"}
+                  {isPortfolioMode ? "Portfolio Companies Simulation" : "Sample Simulation Investments (Selected Simulation)"}
                 </h3>
                 <div className="overflow-x-auto">
                   <table className="w-full border-collapse">
                     <thead>
                       <tr className="bg-gray-100">
                         <th className="px-4 py-2 text-left">
-                          {isPortfolioMode ? "Company" : "ID"}
+                          {isPortfolioMode ? "Company" : "Investment #"}
                         </th>
                         <th className="px-4 py-2 text-left">Entry Stage</th>
                         <th className="px-4 py-2 text-left">Entry Amount ($MM)</th>
@@ -776,35 +1046,45 @@ function App() {
                       </tr>
                     </thead>
                     <tbody>
-                      {results.investments.map((inv) => {
-                        // Find the matching portfolio company (for portfolio mode)
-                        const company = isPortfolioMode 
-                          ? portfolioCompanies.find(c => c.id === inv.id) 
-                          : null;
-                          
-                        return (
-                          <tr key={inv.id} className="border-b border-gray-200">
-                            <td className="px-4 py-2">
-                              {isPortfolioMode 
-                                ? (company ? company.name : `Company ${inv.id}`)
-                                : inv.id}
-                            </td>
-                            <td className="px-4 py-2">
-                              <StageBadge stage={inv.entryStage} />
-                            </td>
-                            <td className="px-4 py-2">${inv.entryAmount.toFixed(2)}</td>
-                            <td className="px-4 py-2">
-                              <StageBadge stage={inv.exitStage} />
-                            </td>
-                            <td className="px-4 py-2">${inv.exitAmount.toFixed(2)}</td>
-                            <td className="px-4 py-2">
-                              {inv.entryAmount > 0
-                                ? (inv.exitAmount / inv.entryAmount).toFixed(2)
-                                : "N/A"}
-                            </td>
-                          </tr>
-                        );
-                      })}
+                      {(() => {
+                        // Group investments by simulation
+                        const simMap = new Map();
+                        results.investments.forEach(inv => {
+                          const parts = String(inv.id).split('-');
+                          const simIdx = parts[0] ? parseInt(parts[0], 10) : 1;
+                          if (!simMap.has(simIdx)) simMap.set(simIdx, []);
+                          simMap.get(simIdx).push(inv);
+                        });
+                        const numToShow = Math.floor(results.numInvestments);
+                        const invs = simMap.get(selectedSim) || [];
+                        // For portfolio mode, build a map from company id to name
+                        let companyNameMap: Record<string, string> = {};
+                        if (isPortfolioMode) {
+                          const pcs = useVCFundStore.getState().portfolioCompanies;
+                          pcs.forEach(pc => { companyNameMap[String(pc.id)] = pc.name; });
+                        }
+                        return invs.slice(0, numToShow).map((inv, idx) => {
+                          const entryStage = inv.entryStage || "";
+                          const exitStage = inv.exitStage || "";
+                          let companyLabel = idx + 1;
+                          if (isPortfolioMode) {
+                            // inv.id is in the format 'sim-companyId'
+                            const idParts = String(inv.id).split('-');
+                            const companyId = idParts.length > 1 ? idParts.slice(1).join('-') : idParts[0];
+                            companyLabel = companyNameMap[companyId] || companyLabel;
+                          }
+                          return (
+                            <tr key={idx} className="border-b border-gray-200">
+                              <td className="px-4 py-2">{companyLabel}</td>
+                              <td className="px-4 py-2"><StageBadge stage={entryStage} /></td>
+                              <td className="px-4 py-2">${inv.entryAmount.toFixed(2)}</td>
+                              <td className="px-4 py-2"><StageBadge stage={exitStage} /></td>
+                              <td className="px-4 py-2">${inv.exitAmount.toFixed(2)}</td>
+                              <td className="px-4 py-2">{inv.entryAmount > 0 ? (inv.exitAmount / inv.entryAmount).toFixed(2) : "N/A"}</td>
+                            </tr>
+                          );
+                        });
+                      })()}
                     </tbody>
                   </table>
                 </div>
@@ -823,6 +1103,64 @@ function App() {
           )}
         </Card>
       </div>
+
+      {/* Portfolio Password Dialog */}
+      <Dialog open={showPasswordDialog} onOpenChange={setShowPasswordDialog}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Enter Portfolio Mode Password</DialogTitle>
+          </DialogHeader>
+          <div className="py-2">
+            <Input
+              type="password"
+              placeholder="Password"
+              value={passwordInput}
+              onChange={e => setPasswordInput(e.target.value)}
+              onKeyDown={e => {
+                if (e.key === 'Enter') {
+                  if (passwordInput === 'SRV-admin') {
+                    setPortfolioUnlocked(true);
+                    setIsPortfolioMode(true);
+                    setShowPasswordDialog(false);
+                    setPasswordInput("");
+                    toast.success('Portfolio mode unlocked!');
+                  } else {
+                    toast.error('Incorrect password.');
+                  }
+                }
+              }}
+              autoFocus
+            />
+          </div>
+          <DialogFooter>
+            <button
+              className="bg-blue-600 text-white px-4 py-2 rounded mr-2"
+              onClick={() => {
+                if (passwordInput === 'SRV-admin') {
+                  setPortfolioUnlocked(true);
+                  setIsPortfolioMode(true);
+                  setShowPasswordDialog(false);
+                  setPasswordInput("");
+                  toast.success('Portfolio mode unlocked!');
+                } else {
+                  toast.error('Incorrect password.');
+                }
+              }}
+            >
+              Confirm
+            </button>
+            <button
+              className="bg-gray-200 text-gray-800 px-4 py-2 rounded"
+              onClick={() => {
+                setShowPasswordDialog(false);
+                setPasswordInput("");
+              }}
+            >
+              Cancel
+            </button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

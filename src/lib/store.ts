@@ -93,6 +93,16 @@ type VCFundStore = {
   setDilution: (dil: Record<string, [number, number]>) => void;
   updateDilution: (transition: string, values: [number, number]) => void;
   
+  // Exit valuations
+  exitValuations: Record<string, [number, number]>;
+  setExitValuations: (vals: Record<string, [number, number]>) => void;
+  updateExitValuation: (stage: string, values: [number, number]) => void;
+  
+  // Loss probabilities
+  lossProbabilities: Record<string, number>;
+  setLossProbabilities: (probs: Record<string, number>) => void;
+  updateLossProbability: (stage: string, value: number) => void;
+  
   // Results
   simulationResults: SimulationResults | null;
   setSimulationResults: (results: SimulationResults | null) => void;
@@ -259,6 +269,40 @@ export const useVCFundStore = create<VCFundStore>((set, get) => ({
     const newDilution = { ...dilution };
     newDilution[transition] = values;
     set({ dilution: newDilution });
+  },
+  
+  // Exit valuations - defaults
+  exitValuations: {
+    'Pre-Seed': [4, 10],
+    'Seed': [5, 10],
+    'Series A': [20, 40],
+    'Series B': [40, 120],
+    'Series C': [200, 500],
+    'IPO': [1000, 2000]
+  },
+  setExitValuations: (vals) => set({ exitValuations: vals }),
+  updateExitValuation: (stage, values) => {
+    const { exitValuations } = get();
+    const newVals = { ...exitValuations };
+    newVals[stage] = values;
+    set({ exitValuations: newVals });
+  },
+  
+  // Loss probabilities - defaults
+  lossProbabilities: {
+    'Pre-Seed': 30,
+    'Seed': 30,
+    'Series A': 30,
+    'Series B': 20,
+    'Series C': 20,
+    'IPO': 0
+  },
+  setLossProbabilities: (probs) => set({ lossProbabilities: probs }),
+  updateLossProbability: (stage, value) => {
+    const { lossProbabilities } = get();
+    const newProbs = { ...lossProbabilities };
+    newProbs[stage] = value;
+    set({ lossProbabilities: newProbs });
   },
   
   // Results

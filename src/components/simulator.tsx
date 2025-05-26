@@ -17,6 +17,8 @@ export function SimulatorControl() {
     checkSizes,
     probAdvancement,
     dilution,
+    exitValuations,
+    lossProbabilities,
     totalMgmtFee,
     deployableCapital,
     setSimulationResults,
@@ -72,7 +74,6 @@ export function SimulatorControl() {
       if (currentStep < totalSteps) {
         setTimeout(simulationStep, 200);
       } else {
-        // Final step - complete the simulation
         try {
           if (portfolioCompanies.length === 0) {
             toast.error("Please add at least one portfolio company");
@@ -80,112 +81,98 @@ export function SimulatorControl() {
             return;
           }
 
-          // Generate random MOIC and IRR distributions
-          const moics = Array.from({ length: numSimulations }, () => 1 + Math.random() * 3);
-          const irrs = Array.from({ length: numSimulations }, () => -10 + Math.random() * 50);
+          // Run numSimulations Monte Carlo runs
+          const allInvestments: Investment[] = [];
+          const moics: number[] = [];
+          const irrs: number[] = [];
+          let paidInTotal = 0;
+          let distributedTotal = 0;
 
-          // Convert portfolio companies to investments
-          const investments: Investment[] = portfolioCompanies.map((company) => {
-            // Determine exit stage
-            let currentStage = company.stage;
-            let currentEquity = company.ownership / 100; // Convert percentage to decimal
-            
-            const stagesSequence = [...stages.slice(stages.indexOf(company.stage)), "Series C", "IPO"];
-            
-            for (let i = 0; i < stagesSequence.length - 1; i++) {
-              const prevStage = stagesSequence[i];
-              const nextStage = stagesSequence[i + 1];
-              const key = `${prevStage} to ${nextStage}`;
-              
-              // Check if company advances to next stage
-              if (Math.random() * 100 <= (probAdvancement[key] || 0)) {
-                // Apply dilution
-                const dilutionRange = dilution[key] || [10, 20];
-                const dilutionPct = (dilutionRange[0] + Math.random() * (dilutionRange[1] - dilutionRange[0])) / 100;
-                currentEquity *= (1 - dilutionPct);
-                currentStage = nextStage;
-              } else {
-                break;
+          for (let sim = 0; sim < numSimulations; sim++) {
+            let simInvestments: Investment[] = [];
+            let paidIn = 0;
+            let distributed = 0;
+
+            for (const company of portfolioCompanies) {
+              let currentStage = company.stage;
+              let entryAmount = company.checkSize || 1;
+              let exitStage = currentStage;
+              let exitAmount = 0;
+              let equity = 1; // 100% of the investment at entry
+
+              // Progress through stages: Pre-Seed -> Seed -> Series A -> Series B -> Series C -> IPO
+              const allStages = ["Pre-Seed", "Seed", "Series A", "Series B", "Series C", "IPO"];
+              let stageIdx = allStages.indexOf(currentStage);
+              let reachedIPO = false;
+              while (stageIdx < allStages.length - 1 && !reachedIPO) {
+                const fromStage = allStages[stageIdx];
+                const toStage = allStages[stageIdx + 1];
+                // Loss probability at this stage
+                const lossProb = lossProbabilities[fromStage] ?? 30;
+                if (Math.random() * 100 < lossProb) {
+                  exitStage = fromStage;
+                  exitAmount = 0;
+                  break;
+                }
+                // If not IPO, apply dilution and progress
+                if (toStage !== "IPO") {
+                  const dilutionKey = `${fromStage} to ${toStage}`;
+                  const dilutionRange = dilution[dilutionKey] || [10, 25];
+                  const dilutionPct = (dilutionRange[0] + Math.random() * (dilutionRange[1] - dilutionRange[0])) / 100;
+                  equity *= (1 - dilutionPct);
+                  stageIdx++;
+                  currentStage = toStage;
+                } else {
+                  // At IPO, exit
+                  exitStage = "IPO";
+                  const exitRange = exitValuations["Series C"] || [100, 1000];
+                  const exitValuation = exitRange[0] + Math.random() * (exitRange[1] - exitRange[0]);
+                  exitAmount = equity * exitValuation * entryAmount;
+                  reachedIPO = true;
+                  break;
+                }
               }
+              // If exited before IPO, use exit valuation for last stage reached
+              if (!reachedIPO && exitAmount === 0) {
+                const exitRange = exitValuations[currentStage] || [4, 10];
+                const exitValuation = exitRange[0] + Math.random() * (exitRange[1] - exitRange[0]);
+                exitAmount = equity * exitValuation * entryAmount;
+              }
+
+              simInvestments.push({
+                id: `${sim}-${company.id}`,
+                entryStage: company.stage,
+                entryAmount,
+                exitStage,
+                exitAmount,
+              });
+              paidIn += entryAmount;
+              distributed += exitAmount;
             }
 
-            // Determine exit amount
-            let exitAmount = 0;
-            // Stage-based total loss probability
-            const lossProbability = {
-              "Pre-Seed": 0.3,
-              "Seed": 0.3,
-              "Series A": 0.3,
-              "Series B": 0.2,
-              "Series C": 0.2,
-              "IPO": 0.05,
-            };
+            allInvestments.push(...simInvestments);
+            paidInTotal += paidIn;
+            distributedTotal += distributed;
+            moics.push(paidIn > 0 ? distributed / paidIn : 0);
+            // IRR: simple 5-year assumption
+            const irr = paidIn > 0 ? Math.min(Math.max((Math.pow(distributed / paidIn, 1/5) - 1) * 100, -50), 100) : 0;
+            irrs.push(irr);
+          }
 
-            if (Math.random() > (lossProbability[currentStage as keyof typeof lossProbability] || 0.3)) {
-              // Calculate exit based on stage
-              let exitValuation = 0;
-              switch (currentStage) {
-                case "Pre-Seed":
-                  exitValuation = 3 + Math.random() * 7; // 3-10
-                  break;
-                case "Seed":
-                  exitValuation = 5 + Math.random() * 15; // 5-20
-                  break;
-                case "Series A":
-                  exitValuation = 20 + Math.random() * 60; // 20-80
-                  break;
-                case "Series B":
-                  exitValuation = 40 + Math.random() * 160; // 40-200
-                  break;
-                case "Series C":
-                  exitValuation = 200 + Math.random() * 800; // 200-1000
-                  break;
-                case "IPO":
-                  exitValuation = 1000 + Math.random() * 2000; // 1000-3000
-                  break;
-                default:
-                  exitValuation = 10 + Math.random() * 90;
-              }
-              exitAmount = currentEquity * exitValuation;
-            }
+          const meanMoic = moics.reduce((a, b) => a + b, 0) / moics.length;
+          const meanIrr = irrs.reduce((a, b) => a + b, 0) / irrs.length;
 
-            return {
-              id: company.id, // Use the company ID directly for easier mapping in the results table
-              entryStage: company.stage,
-              entryAmount: company.checkSize,
-              exitStage: currentStage,
-              exitAmount: exitAmount,
-            };
-          });
-
-          // Calculate aggregate metrics
-          const paidIn = investments.reduce((sum, inv) => sum + inv.entryAmount, 0);
-          const distributed = investments.reduce((sum, inv) => sum + inv.exitAmount, 0);
-          const meanMoic = paidIn > 0 ? distributed / paidIn : 0;
-
-          // Calculate IRR based on simple cash flow assumption
-          const simplifiedIrr = Math.min(Math.max((Math.pow(meanMoic, 1/5) - 1) * 100, -50), 100);
-
-          // Set results
           const results: SimulationResults = {
             moics,
-            irrs: Array.from({ length: numSimulations }, () => simplifiedIrr + (Math.random() * 20 - 10)),
+            irrs,
             meanMoic,
-            meanIrr: simplifiedIrr,
-            investments,
-            paidIn,
-            distributed,
-            numInvestments: investments.length,
+            meanIrr,
+            investments: allInvestments,
+            paidIn: paidInTotal / numSimulations,
+            distributed: distributedTotal / numSimulations,
+            numInvestments: portfolioCompanies.length,
             managementFees: totalMgmtFee,
           };
-
-          console.log("Portfolio simulation completed with results:", {
-            meanMoic,
-            meanIrr: simplifiedIrr,
-            paidIn,
-            distributed,
-            numInvestments: investments.length,
-          });
 
           setPortfolioSimulationResults(results);
           toast.success("Portfolio simulation completed successfully!");
@@ -198,7 +185,6 @@ export function SimulatorControl() {
       }
     };
 
-    // Start simulation steps
     setTimeout(simulationStep, 200);
   };
 
@@ -231,137 +217,122 @@ export function SimulatorControl() {
       } else {
         // Final step - complete the simulation
         try {
-          // Generate random MOIC and IRR distributions
-          const moics = Array.from({ length: numSimulations }, () => 1 + Math.random() * 3);
-          const irrs = Array.from({ length: numSimulations }, () => -10 + Math.random() * 50);
+          // --- NEW LOGIC: Run numSimulations full-fund simulations ---
+          const allMoics: number[] = [];
+          const allIrRs: number[] = [];
+          let allInvestments: Investment[] = [];
+          let totalPaidIn = 0;
+          let totalDistributed = 0;
 
-          // Generate sample investments
-          const sampleInvestments: Investment[] = [];
-          let investmentId = 1;
+          for (let sim = 0; sim < numSimulations; sim++) {
+            const sampleInvestments: Investment[] = [];
+            let investmentId = 1;
 
-          for (const stage of validStages) {
-            const allocation = (stageAllocations[stage] / 100) * deployableCapital;
-            let deployedInStage = 0;
+            for (const stage of validStages) {
+              const allocation = (stageAllocations[stage] / 100) * deployableCapital;
+              let deployedInStage = 0;
 
-            while (deployedInStage < allocation) {
-              // Random valuation and check size within ranges
-              const valRange = valuations[stage] || [1, 10];
-              const checkRange = checkSizes[stage] || [0.5, 2];
+              while (deployedInStage < allocation) {
+                // Random valuation and check size within ranges
+                const valRange = valuations[stage] || [1, 10];
+                const checkRange = checkSizes[stage] || [0.5, 2];
 
-              const valuation = valRange[0] + Math.random() * (valRange[1] - valRange[0]);
-              let checkSize = checkRange[0] + Math.random() * (checkRange[1] - checkRange[0]);
+                const valuation = valRange[0] + Math.random() * (valRange[1] - valRange[0]);
+                let checkSize = checkRange[0] + Math.random() * (checkRange[1] - checkRange[0]);
 
-              // Cap check size by remaining allocation
-              checkSize = Math.min(checkSize, allocation - deployedInStage);
-              if (checkSize < 0.1) break; // Too small to be meaningful
+                // Cap check size by remaining allocation
+                checkSize = Math.min(checkSize, allocation - deployedInStage);
+                if (checkSize < 0.1) break; // Too small to be meaningful
 
-              deployedInStage += checkSize;
+                deployedInStage += checkSize;
 
-              // Calculate equity
-              const equity = checkSize / valuation;
+                // Calculate equity
+                let equity = checkSize / valuation;
 
-              // Determine exit stage
-              let currentStage = stage;
-              let currentEquity = equity;
+                // Determine exit stage
+                let currentStage = stage;
 
-              const stagesSequence = [...stages.slice(stages.indexOf(stage)), "Series C", "IPO"];
+                const stagesSequence = [...stages.slice(stages.indexOf(stage)), "Series C", "IPO"];
 
-              for (let i = 0; i < stagesSequence.length - 1; i++) {
-                const prevStage = stagesSequence[i];
-                const nextStage = stagesSequence[i + 1];
-                const key = `${prevStage} to ${nextStage}`;
+                for (let i = 0; i < stagesSequence.length - 1; i++) {
+                  const prevStage = stagesSequence[i];
+                  const nextStage = stagesSequence[i + 1];
+                  const key = `${prevStage} to ${nextStage}`;
 
-                // Check if company advances to next stage
-                if (Math.random() * 100 <= (probAdvancement[key] || 0)) {
-                  // Apply dilution
-                  const dilutionRange = dilution[key] || [10, 20];
-                  const dilutionPct = (dilutionRange[0] + Math.random() * (dilutionRange[1] - dilutionRange[0])) / 100;
-                  currentEquity *= (1 - dilutionPct);
-                  currentStage = nextStage;
-                } else {
-                  break;
+                  // Check if company advances to next stage
+                  if (Math.random() * 100 <= (probAdvancement[key] || 0)) {
+                    // Apply dilution from user config
+                    const dilutionRange = dilution[key] || [10, 20];
+                    const dilutionPct = (dilutionRange[0] + Math.random() * (dilutionRange[1] - dilutionRange[0])) / 100;
+                    equity *= (1 - dilutionPct);
+                    currentStage = nextStage;
+                  } else {
+                    break;
+                  }
                 }
-              }
 
-              // Determine exit amount (including possibility of total loss)
-              let exitAmount = 0;
-              // Stage-based total loss probability
-              const lossProbability = {
-                "Pre-Seed": 0.3,
-                "Seed": 0.3,
-                "Series A": 0.3,
-                "Series B": 0.2,
-                "Series C": 0.2,
-                "IPO": 0.05,
-              };
-
-              if (Math.random() > (lossProbability[currentStage as keyof typeof lossProbability] || 0.3)) {
-                // Calculate exit based on stage
-                let exitValuation = 0;
-                switch (currentStage) {
-                  case "Pre-Seed":
-                    exitValuation = 3 + Math.random() * 7; // 3-10
-                    break;
-                  case "Seed":
-                    exitValuation = 5 + Math.random() * 15; // 5-20
-                    break;
-                  case "Series A":
-                    exitValuation = 20 + Math.random() * 60; // 20-80
-                    break;
-                  case "Series B":
-                    exitValuation = 40 + Math.random() * 160; // 40-200
-                    break;
-                  case "Series C":
-                    exitValuation = 200 + Math.random() * 800; // 200-1000
-                    break;
-                  case "IPO":
-                    exitValuation = 1000 + Math.random() * 2000; // 1000-3000
-                    break;
-                  default:
-                    exitValuation = 10 + Math.random() * 90;
+                // Determine exit amount (including possibility of total loss)
+                let exitAmount = 0;
+                // Use user-configured loss probability
+                const lossProb = lossProbabilities[currentStage] ?? 30;
+                if (Math.random() * 100 > lossProb) {
+                  // Use user-configured exit valuation
+                  const exitRange = exitValuations[currentStage] || [10, 90];
+                  const exitValuation = exitRange[0] + Math.random() * (exitRange[1] - exitRange[0]);
+                  exitAmount = equity * exitValuation;
                 }
-                exitAmount = currentEquity * exitValuation;
-              }
 
-              // Add to investments
-              sampleInvestments.push({
-                id: investmentId++,
-                entryStage: stage,
-                entryAmount: checkSize,
-                exitStage: currentStage,
-                exitAmount: exitAmount,
-              });
+                // Add to investments
+                sampleInvestments.push({
+                  id: `${sim + 1}-${investmentId++}`,
+                  entryStage: stage,
+                  entryAmount: checkSize,
+                  exitStage: currentStage,
+                  exitAmount: exitAmount,
+                });
+              }
             }
+
+            // Fund-level paid-in and distributed
+            const paidIn = sampleInvestments.reduce((sum, inv) => sum + inv.entryAmount, 0);
+            const distributed = sampleInvestments.reduce((sum, inv) => sum + inv.exitAmount, 0);
+            totalPaidIn += paidIn;
+            totalDistributed += distributed;
+            allInvestments = allInvestments.concat(sampleInvestments);
+
+            // MOIC for this simulation
+            const moic = paidIn > 0 ? distributed / paidIn : 0;
+            allMoics.push(moic);
+
+            // IRR calculation (simple, as in your JS code)
+            // For a more accurate IRR, you could implement a cash flow schedule as in your Python code
+            const simplifiedIrr = Math.min(Math.max((Math.pow(moic, 1/5) - 1) * 100, -50), 100);
+            allIrRs.push(simplifiedIrr);
           }
 
-          // Calculate aggregate metrics
-          const paidIn = sampleInvestments.reduce((sum, inv) => sum + inv.entryAmount, 0);
-          const distributed = sampleInvestments.reduce((sum, inv) => sum + inv.exitAmount, 0);
-          const meanMoic = distributed / paidIn;
-
-          // Calculate IRR based on simple cash flow assumption
-          // Assume investments are made in year 0-5 and exits happen in years 3-10
-          const simplifiedIrr = Math.min(Math.max((Math.pow(meanMoic, 1/5) - 1) * 100, -50), 100);
+          // Aggregate metrics
+          const meanMoic = allMoics.reduce((a, b) => a + b, 0) / allMoics.length;
+          const meanIrr = allIrRs.reduce((a, b) => a + b, 0) / allIrRs.length;
 
           // Set results
           const results: SimulationResults = {
-            moics,
-            irrs: Array.from({ length: numSimulations }, () => simplifiedIrr + (Math.random() * 20 - 10)),
+            moics: allMoics,
+            irrs: allIrRs,
             meanMoic,
-            meanIrr: simplifiedIrr,
-            investments: sampleInvestments,
-            paidIn,
-            distributed,
-            numInvestments: sampleInvestments.length,
+            meanIrr,
+            investments: allInvestments,
+            paidIn: totalPaidIn / numSimulations,
+            distributed: totalDistributed / numSimulations,
+            numInvestments: allInvestments.length / numSimulations,
             managementFees: totalMgmtFee,
           };
 
           console.log("Simulation completed with results:", {
             meanMoic,
-            meanIrr: simplifiedIrr,
-            paidIn,
-            distributed,
-            numInvestments: sampleInvestments.length,
+            meanIrr,
+            paidIn: results.paidIn,
+            distributed: results.distributed,
+            numInvestments: results.numInvestments,
           });
 
           setSimulationResults(results);

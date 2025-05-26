@@ -52,10 +52,8 @@ export function PortfolioManager() {
   const [newCompany, setNewCompany] = useState<Omit<PortfolioCompany, 'id'>>({
     name: '',
     stage: 'Seed',
-    valuation: 10,
     checkSize: 1,
-    ownership: 10,
-    entryDate: new Date()
+    entryDate: new Date(),
   });
   
   const [editCompany, setEditCompany] = useState<PortfolioCompany | null>(null);
@@ -68,18 +66,8 @@ export function PortfolioManager() {
       return;
     }
     
-    if (newCompany.valuation <= 0) {
-      toast.error("Valuation must be greater than 0");
-      return;
-    }
-    
     if (newCompany.checkSize <= 0) {
       toast.error("Check size must be greater than 0");
-      return;
-    }
-    
-    if (newCompany.ownership <= 0 || newCompany.ownership > 100) {
-      toast.error("Ownership percentage must be between 0 and 100");
       return;
     }
     
@@ -89,10 +77,8 @@ export function PortfolioManager() {
     setNewCompany({
       name: '',
       stage: 'Seed',
-      valuation: 10,
       checkSize: 1,
-      ownership: 10,
-      entryDate: new Date()
+      entryDate: new Date(),
     });
     
     toast.success("Company added to portfolio");
@@ -116,28 +102,16 @@ export function PortfolioManager() {
       return;
     }
     
-    if (editCompany.valuation <= 0) {
-      toast.error("Valuation must be greater than 0");
-      return;
-    }
-    
     if (editCompany.checkSize <= 0) {
       toast.error("Check size must be greater than 0");
-      return;
-    }
-    
-    if (editCompany.ownership <= 0 || editCompany.ownership > 100) {
-      toast.error("Ownership percentage must be between 0 and 100");
       return;
     }
     
     updatePortfolioCompany(editCompany.id, {
       name: editCompany.name,
       stage: editCompany.stage,
-      valuation: editCompany.valuation,
       checkSize: editCompany.checkSize,
-      ownership: editCompany.ownership,
-      entryDate: editCompany.entryDate
+      entryDate: editCompany.entryDate,
     });
     
     setEditMode(null);
@@ -192,48 +166,17 @@ export function PortfolioManager() {
           </div>
           
           <div>
-            <label htmlFor="company-valuation" className="text-xs font-medium block mb-1">
-              Valuation ($MM)
-            </label>
-            <Input
-              id="company-valuation"
-              type="number"
-              step="0.1"
-              min="0.1"
-              placeholder="Enter valuation"
-              value={newCompany.valuation}
-              onChange={(e) => setNewCompany({ ...newCompany, valuation: parseFloat(e.target.value) || 0 })}
-            />
-          </div>
-          
-          <div>
-            <label htmlFor="company-check" className="text-xs font-medium block mb-1">
+            <label htmlFor="company-checksize" className="text-xs font-medium block mb-1">
               Check Size ($MM)
             </label>
             <Input
-              id="company-check"
+              id="company-checksize"
               type="number"
-              step="0.1"
-              min="0.1"
+              step="0.01"
+              min="0.01"
               placeholder="Enter check size"
               value={newCompany.checkSize}
               onChange={(e) => setNewCompany({ ...newCompany, checkSize: parseFloat(e.target.value) || 0 })}
-            />
-          </div>
-          
-          <div>
-            <label htmlFor="company-ownership" className="text-xs font-medium block mb-1">
-              Ownership (%)
-            </label>
-            <Input
-              id="company-ownership"
-              type="number"
-              step="0.1"
-              min="0.1"
-              max="100"
-              placeholder="Enter ownership %"
-              value={newCompany.ownership}
-              onChange={(e) => setNewCompany({ ...newCompany, ownership: parseFloat(e.target.value) || 0 })}
             />
           </div>
         </div>
@@ -306,59 +249,18 @@ export function PortfolioManager() {
                       
                       <div>
                         <label className="text-xs font-medium block mb-1">
-                          Valuation ($MM)
-                        </label>
-                        <Input
-                          type="number"
-                          step="0.1"
-                          min="0.1"
-                          placeholder="Enter valuation"
-                          value={editCompany?.valuation || 0}
-                          onChange={(e) => 
-                            setEditCompany(
-                              editCompany 
-                                ? { ...editCompany, valuation: parseFloat(e.target.value) || 0 } 
-                                : null
-                            )
-                          }
-                        />
-                      </div>
-                      
-                      <div>
-                        <label className="text-xs font-medium block mb-1">
                           Check Size ($MM)
                         </label>
                         <Input
                           type="number"
-                          step="0.1"
-                          min="0.1"
+                          step="0.01"
+                          min="0.01"
                           placeholder="Enter check size"
                           value={editCompany?.checkSize || 0}
                           onChange={(e) => 
                             setEditCompany(
                               editCompany 
                                 ? { ...editCompany, checkSize: parseFloat(e.target.value) || 0 } 
-                                : null
-                            )
-                          }
-                        />
-                      </div>
-                      
-                      <div>
-                        <label className="text-xs font-medium block mb-1">
-                          Ownership (%)
-                        </label>
-                        <Input
-                          type="number"
-                          step="0.1"
-                          min="0.1"
-                          max="100"
-                          placeholder="Enter ownership %"
-                          value={editCompany?.ownership || 0}
-                          onChange={(e) => 
-                            setEditCompany(
-                              editCompany 
-                                ? { ...editCompany, ownership: parseFloat(e.target.value) || 0 } 
                                 : null
                             )
                           }
@@ -415,16 +317,8 @@ export function PortfolioManager() {
                     
                     <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-sm">
                       <div className="flex justify-between">
-                        <span className="text-gray-500">Valuation:</span>
-                        <span>${company.valuation}MM</span>
-                      </div>
-                      <div className="flex justify-between">
                         <span className="text-gray-500">Check Size:</span>
-                        <span>${company.checkSize}MM</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span className="text-gray-500">Ownership:</span>
-                        <span>{company.ownership}%</span>
+                        <span>{company.checkSize}$MM</span>
                       </div>
                     </div>
                   </div>

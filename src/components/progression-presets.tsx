@@ -21,11 +21,11 @@ type ProgressionDataSource = {
 // Recent market data sources for progression rates
 const progressionDataSources: ProgressionDataSource[] = [
   {
-    name: 'Pitchbook 2023',
+    name: 'Pitchbook',
     description: 'North American Venture Capital progression rates',
     year: '2023',
     source: 'Pitchbook',
-    sourceUrl: 'https://pitchbook.com/news/reports/q4-2023-pitchbook-nvca-venture-monitor',
+    sourceUrl: 'https://nvca.org/wp-content/uploads/2025/01/Q4-2024-PitchBook-NVCA-Venture-Monitor.pdf',
     data: {
       'Pre-Seed to Seed': 52,
       'Seed to Series A': 31,
@@ -35,7 +35,7 @@ const progressionDataSources: ProgressionDataSource[] = [
     },
   },
   {
-    name: 'CBInsights 2022',
+    name: 'CBInsights',
     description: 'Global tech startup progression rates',
     year: '2022',
     source: 'CB Insights',
@@ -50,7 +50,7 @@ const progressionDataSources: ProgressionDataSource[] = [
     },
   },
   {
-    name: 'Crunchbase 2021',
+    name: 'Crunchbase',
     description: 'U.S. startup progression rates',
     year: '2021',
     source: 'Crunchbase',
