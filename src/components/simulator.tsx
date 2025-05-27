@@ -3,6 +3,7 @@ import { useVCFundStore, type SimulationResults, type Investment } from '../lib/
 import { Button } from './ui/button';
 import { Progress } from './ui/progress';
 import { toast } from 'sonner';
+import { useState } from 'react';
 
 export function SimulatorControl() {
   const {
@@ -29,6 +30,8 @@ export function SimulatorControl() {
     isPortfolioMode,
     portfolioCompanies,
     setPortfolioSimulationResults,
+    followOn,
+    followOnAB,
   } = useVCFundStore();
 
   const stages = ["Pre-Seed", "Seed", "Series A", "Series B"];
@@ -44,6 +47,8 @@ export function SimulatorControl() {
       deployableCapital,
       isPortfolioMode,
       portfolioCompaniesCount: portfolioCompanies.length,
+      followOn,
+      followOnAB,
     });
   }, [
     fundSize,
@@ -54,6 +59,8 @@ export function SimulatorControl() {
     deployableCapital,
     isPortfolioMode,
     portfolioCompanies,
+    followOn,
+    followOnAB,
   ]);
 
   // Simulate portfolio mode
@@ -94,54 +101,93 @@ export function SimulatorControl() {
             let distributed = 0;
 
             for (const company of portfolioCompanies) {
-              let currentStage = company.stage;
+              let entryStage = company.stage;
               let entryAmount = company.checkSize || 1;
-              let exitStage = currentStage;
-              let exitAmount = 0;
               let equity = 1; // 100% of the investment at entry
-
-              // Progress through stages: Pre-Seed -> Seed -> Series A -> Series B -> Series C -> IPO
-              const allStages = ["Pre-Seed", "Seed", "Series A", "Series B", "Series C", "IPO"];
-              let stageIdx = allStages.indexOf(currentStage);
+              let currentStage = entryStage;
+              let exitStage = entryStage;
+              let exitAmount = 0;
               let reachedIPO = false;
-              while (stageIdx < allStages.length - 1 && !reachedIPO) {
-                const fromStage = allStages[stageIdx];
-                const toStage = allStages[stageIdx + 1];
-                // Loss probability at this stage
-                const lossProb = lossProbabilities[fromStage] ?? 30;
-                if (Math.random() * 100 < lossProb) {
-                  exitStage = fromStage;
-                  exitAmount = 0;
-                  break;
+
+              // Use the same stage sequence as fund simulation
+              const stagesSequence = ["Pre-Seed", "Seed", "Series A", "Series B", "Series C", "IPO"];
+              let stageIdx = stagesSequence.indexOf(entryStage);
+
+              // Track if forced follow-on has been applied for this company at each stage
+              let forcedSeedFollow = false;
+              let forcedABFollow = false;
+
+              for (let i = stageIdx; i < stagesSequence.length - 1; i++) {
+                const fromStage = stagesSequence[i];
+                const toStage = stagesSequence[i + 1];
+                // 1. Forced follow-on logic: only force if this is the ticked follow-on stage for this company and not already forced
+                let forceAdvance = false;
+                if (!forcedSeedFollow && fromStage === "Seed" && followOn && followOn.selected && followOn.selected[company.id] && currentStage === "Seed") {
+                  forceAdvance = true;
+                  forcedSeedFollow = true;
                 }
-                // If not IPO, apply dilution and progress
-                if (toStage !== "IPO") {
-                  const dilutionKey = `${fromStage} to ${toStage}`;
-                  const dilutionRange = dilution[dilutionKey] || [10, 25];
+                if (!forcedABFollow && fromStage === "Series A" && followOnAB && followOnAB.selected && followOnAB.selected[company.id] && currentStage === "Series A") {
+                  forceAdvance = true;
+                  forcedABFollow = true;
+                }
+                // 2. Progression probability
+                const progressionKey = `${fromStage} to ${toStage}`;
+                const progressionProb = probAdvancement[progressionKey] ?? 0;
+                if (forceAdvance) {
+                  // Forced promotion: always advance, set valuation
+                  const dilutionRange = dilution[progressionKey] || [10, 25];
                   const dilutionPct = (dilutionRange[0] + Math.random() * (dilutionRange[1] - dilutionRange[0])) / 100;
                   equity *= (1 - dilutionPct);
-                  stageIdx++;
                   currentStage = toStage;
+                  if (fromStage === "Seed") entryAmount = followOn.avgVal;
+                  if (fromStage === "Series A") entryAmount = followOnAB.avgVal;
+                  // If reached IPO, exit
+                  if (toStage === "IPO") {
+                    exitStage = "IPO";
+                    const exitRange = exitValuations["Series C"] || [100, 1000];
+                    const exitValuation = exitRange[0] + Math.random() * (exitRange[1] - exitRange[0]);
+                    exitAmount = equity * exitValuation * entryAmount;
+                    reachedIPO = true;
+                    break;
+                  }
+                  continue; // skip normal progression logic
+                }
+                if (Math.random() * 100 < progressionProb) {
+                  // 3. Apply dilution
+                  const dilutionRange = dilution[progressionKey] || [10, 25];
+                  const dilutionPct = (dilutionRange[0] + Math.random() * (dilutionRange[1] - dilutionRange[0])) / 100;
+                  equity *= (1 - dilutionPct);
+                  currentStage = toStage;
+                  // 5. If reached IPO, exit
+                  if (toStage === "IPO") {
+                    exitStage = "IPO";
+                    const exitRange = exitValuations["Series C"] || [100, 1000];
+                    const exitValuation = exitRange[0] + Math.random() * (exitRange[1] - exitRange[0]);
+                    exitAmount = equity * exitValuation * entryAmount;
+                    reachedIPO = true;
+                    break;
+                  }
                 } else {
-                  // At IPO, exit
-                  exitStage = "IPO";
-                  const exitRange = exitValuations["Series C"] || [100, 1000];
-                  const exitValuation = exitRange[0] + Math.random() * (exitRange[1] - exitRange[0]);
-                  exitAmount = equity * exitValuation * entryAmount;
-                  reachedIPO = true;
+                  // Did not progress, break out of the loop
                   break;
                 }
               }
-              // If exited before IPO, use exit valuation for last stage reached
-              if (!reachedIPO && exitAmount === 0) {
+              // After progression, check loss probability at the final stage
+              const lossProb = lossProbabilities[currentStage] ?? 30;
+              if (Math.random() * 100 < lossProb) {
+                exitStage = currentStage;
+                exitAmount = 0;
+              } else if (!reachedIPO) {
+                // Not lost and not IPO, use exit valuation for current stage
                 const exitRange = exitValuations[currentStage] || [4, 10];
                 const exitValuation = exitRange[0] + Math.random() * (exitRange[1] - exitRange[0]);
                 exitAmount = equity * exitValuation * entryAmount;
+                exitStage = currentStage;
               }
 
               simInvestments.push({
                 id: `${sim}-${company.id}`,
-                entryStage: company.stage,
+                entryStage,
                 entryAmount,
                 exitStage,
                 exitAmount,

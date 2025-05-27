@@ -2,9 +2,10 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from './components/ui/tabs';
 import { Slider } from './components/ui/slider';
 import { Bar, BarChart, XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer, Cell } from 'recharts';
+import { PieChart, Pie } from 'recharts';
 import { Card } from './components/ui/card';
 import { Button } from './components/ui/button';
-import { FileDown, FileUp, Sparkles } from 'lucide-react';
+import { FileDown, FileUp, Eye, EyeOff, ExternalLink } from 'lucide-react';
 import { toast, Toaster } from 'sonner';
 import { cn } from './lib/utils';
 import { useVCFundStore } from './lib/store';
@@ -17,6 +18,189 @@ import { PortfolioManager, StageBadge } from './components/portfolio-manager';
 import { ProgressionPresets, ProgressionSourcesInfo } from './components/progression-presets';
 import { ShareDialog, LoadSharedParameters, SaveSimulationResults } from './components/share-dialog';
 import { SimulatorControl } from './components/simulator';
+import type { Investment } from './lib/store';
+
+// Update ConfettiBurst to accept x/y coordinates
+function ConfettiBurst({ trigger, x, y }: { trigger: boolean; x: number; y: number }) {
+  const [show, setShow] = useState(false);
+  useEffect(() => {
+    if (trigger) {
+      setShow(true);
+      const timeout = setTimeout(() => setShow(false), 700);
+      return () => clearTimeout(timeout);
+    }
+  }, [trigger]);
+  if (!show) return null;
+  // 28 blue confetti pieces, smaller, more random, more spread
+  const confetti = Array.from({ length: 28 }).map((_, i) => {
+    const angle = Math.random() * 2 * Math.PI;
+    const distance = 60 + Math.random() * 60;
+    const xOffset = Math.cos(angle) * distance;
+    const yOffset = Math.sin(angle) * distance;
+    const rotate = Math.random() * 360;
+    const delay = Math.random() * 0.12;
+    const shape = Math.random() > 0.5 ? '50%' : '2px'; // circle or rectangle
+    return (
+      <div
+        key={i}
+        style={{
+          position: 'absolute',
+          left: '50%',
+          top: '50%',
+          width: 4 + Math.random() * 3,
+          height: 8 + Math.random() * 6,
+          background: `hsl(210, 90%, ${55 + Math.random() * 25}%)`,
+          borderRadius: shape,
+          transform: `translate(-50%, -50%) rotate(${rotate}deg)`,
+          animation: `confetti-burst 0.55s cubic-bezier(.61,-0.01,.41,1.01) ${delay}s both`,
+          '--x': `${xOffset}px`,
+          '--y': `${yOffset}px`,
+          '--rotate': `${rotate}deg`,
+          zIndex: 1000,
+        } as React.CSSProperties}
+      />
+    );
+  });
+  return (
+    <div style={{
+      pointerEvents: 'none',
+      position: 'fixed',
+      left: 0, top: 0, width: '100vw', height: '100vh',
+      overflow: 'visible',
+      zIndex: 1000,
+    }}>
+      <div style={{ position: 'absolute', left: x, top: y, width: 0, height: 0 }}>
+        {confetti}
+      </div>
+    </div>
+  );
+}
+
+// Portfolio Overview Panel for Portfolio Mode
+function PortfolioOverviewPanel({ companies, followOn, followOnAB }: { companies: any[], followOn: any, followOnAB: any }) {
+  // Group by stage
+  const stages = ['Pre-Seed', 'Seed', 'Series A', 'Series B', 'Series C'];
+  const stageData = stages.map(stage => {
+    const comps = companies.filter(c => c.stage === stage);
+    return {
+      stage,
+      count: comps.length,
+      totalCheck: comps.reduce((a: number, b: any) => a + b.checkSize, 0),
+      totalVal: comps.reduce((a: number, b: any) => a + b.valuation, 0),
+      avgCheck: comps.length ? comps.reduce((a: number, b: any) => a + b.checkSize, 0) / comps.length : 0,
+      avgVal: comps.length ? comps.reduce((a: number, b: any) => a + b.valuation, 0) / comps.length : 0,
+      avgOwn: comps.length ? comps.reduce((a: number, b: any) => a + b.ownership, 0) / comps.length : 0,
+    };
+  });
+  const numFollowOnInvestments = followOn.selected ? (Object.values(followOn.selected) as number[]).reduce((a, b) => a + (typeof b === 'number' ? b : 0), 0 as number) : 0;
+  const numFollowOnABInvestments = followOnAB.selected ? (Object.values(followOnAB.selected) as number[]).reduce((a, b) => a + (typeof b === 'number' ? b : 0), 0 as number) : 0;
+  const totalDeployed = companies.reduce((a: number, b: any) => a + b.checkSize, 0) + (followOn.avgCheck * Number(numFollowOnInvestments)) + (followOnAB.avgCheck * Number(numFollowOnABInvestments));
+  // Pie data for stage distribution
+  const pieData = stageData.filter(d => d.count > 0).map(d => ({ name: d.stage, value: d.count }));
+  const COLORS = ['#60a5fa','#34d399','#a78bfa','#fbbf24','#f87171'];
+
+  // Total deployed per stage
+  const deployedByStage = stages.map(stage => {
+    const comps = companies.filter(c => c.stage === stage);
+    return {
+      stage,
+      total: comps.reduce((a: number, b: any) => a + b.checkSize, 0)
+    };
+  });
+
+  return (
+    <div className="space-y-6">
+      {/* Summary metrics grid */}
+      <div className="grid grid-cols-1 md:grid-cols-3 lg:grid-cols-5 gap-4 mb-6">
+        <div className="bg-gray-100 p-4 rounded-lg">
+          <div className="text-sm text-gray-500">Total Capital Deployed</div>
+          <div className="text-2xl font-bold">{totalDeployed.toFixed(2)} $MM</div>
+        </div>
+        <div className="bg-gray-100 p-4 rounded-lg">
+          <div className="text-sm text-gray-500"># of Companies</div>
+          <div className="text-2xl font-bold">{companies.length}</div>
+        </div>
+        <div className="bg-gray-100 p-4 rounded-lg">
+          <div className="text-sm text-gray-500"># Follow-ons (Seed-A)</div>
+          <div className="text-2xl font-bold">{Number(numFollowOnInvestments)}</div>
+        </div>
+        <div className="bg-gray-100 p-4 rounded-lg">
+          <div className="text-sm text-gray-500"># Follow-ons (A-B)</div>
+          <div className="text-2xl font-bold">{Number(numFollowOnABInvestments)}</div>
+        </div>
+        {/* Per-stage deployed */}
+        {deployedByStage.map(({ stage, total }) => (
+          <div key={stage} className="bg-gray-100 p-4 rounded-lg flex flex-col justify-between items-center">
+            <div className="mb-2"><StageBadge stage={stage} /></div>
+            <div className="text-2xl font-bold">{total.toFixed(2)} $MM</div>
+          </div>
+        ))}
+      </div>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <div className="bg-white rounded-lg shadow p-4 flex flex-col items-center">
+          <h3 className="font-semibold mb-2">Companies by Stage</h3>
+          <PieChart width={220} height={220}>
+            <Pie data={pieData} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={80} label>
+              {pieData.map((entry, idx) => (
+                <Cell key={`cell-${idx}`} fill={COLORS[idx % COLORS.length]} />
+              ))}
+            </Pie>
+          </PieChart>
+          {/* Legend */}
+          <div className="flex flex-wrap justify-center mt-2 gap-2">
+            {pieData.map((entry, idx) => (
+              <span key={entry.name} className="flex items-center text-xs">
+                <span className="inline-block w-3 h-3 rounded-full mr-1" style={{ background: COLORS[idx % COLORS.length] }}></span>
+                {entry.name}
+              </span>
+            ))}
+          </div>
+        </div>
+        <div className="bg-white rounded-lg shadow p-4">
+          <h3 className="font-semibold mb-2">Avg Check Size by Stage</h3>
+          <BarChart width={260} height={220} data={stageData}>
+            <CartesianGrid strokeDasharray="3 3" />
+            <XAxis dataKey="stage" />
+            <YAxis />
+            <Tooltip />
+            <Bar dataKey="avgCheck" fill="#60a5fa" name="Avg Check Size" />
+          </BarChart>
+        </div>
+      </div>
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+        <div className="bg-white rounded-lg shadow p-4">
+          <h3 className="font-semibold mb-2">Avg Valuation by Stage</h3>
+          <BarChart width={260} height={220} data={stageData}>
+            <CartesianGrid strokeDasharray="3 3" />
+            <XAxis dataKey="stage" />
+            <YAxis />
+            <Tooltip />
+            <Bar dataKey="avgVal" fill="#a78bfa" name="Avg Valuation" />
+          </BarChart>
+        </div>
+        <div className="bg-white rounded-lg shadow p-4">
+          <h3 className="font-semibold mb-2">Avg Ownership by Stage</h3>
+          <BarChart width={260} height={220} data={stageData}>
+            <CartesianGrid strokeDasharray="3 3" />
+            <XAxis dataKey="stage" />
+            <YAxis />
+            <Tooltip />
+            <Bar dataKey="avgOwn" fill="#34d399" name="Avg Ownership %" />
+          </BarChart>
+        </div>
+      </div>
+      <div className="mt-4 text-right font-medium">
+        <div className="mb-2 text-sm text-gray-700">
+          <span className="font-semibold">Follow-ons (Seed-A):</span> {Number(numFollowOnInvestments)} investments × {followOn.avgCheck}$MM = <span className="text-blue-700">{(followOn.avgCheck * Number(numFollowOnInvestments)).toFixed(2)} $MM</span>
+        </div>
+        <div className="mb-2 text-sm text-gray-700">
+          <span className="font-semibold">Follow-ons (A-B):</span> {Number(numFollowOnABInvestments)} investments × {followOnAB.avgCheck}$MM = <span className="text-blue-700">{(followOnAB.avgCheck * Number(numFollowOnABInvestments)).toFixed(2)} $MM</span>
+        </div>
+        Total Capital Deployed: <span className="text-blue-700">{totalDeployed.toFixed(2)} $MM</span>
+      </div>
+    </div>
+  );
+}
 
 function App() {
   // Add a ref to capture the results section for saving
@@ -62,6 +246,27 @@ function App() {
   const [portfolioUnlocked, setPortfolioUnlocked] = useState(false);
   const [showPasswordDialog, setShowPasswordDialog] = useState(false);
   const [passwordInput, setPasswordInput] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
+  const [confettiTrigger, setConfettiTrigger] = useState(false);
+  const [confettiPos, setConfettiPos] = useState<{x: number, y: number}>({x: 0, y: 0});
+  const srvBtnRef = useRef<HTMLAnchorElement>(null);
+  const [showPortfolioOverview, setShowPortfolioOverview] = useState(false);
+  const [followOn, setFollowOn] = useState({
+    avgCheck: 1,
+    numInvestments: 0,
+    avgVal: 10,
+    ownership: 10,
+    inputMode: 'checkSize' as 'checkSize' | 'ownership',
+    selected: {} as Record<string, number>,
+  });
+  const [followOnAB, setFollowOnAB] = useState({
+    avgCheck: 1,
+    numInvestments: 0,
+    avgVal: 10,
+    ownership: 10,
+    inputMode: 'checkSize' as 'checkSize' | 'ownership',
+    selected: {} as Record<string, number>,
+  });
 
   // Handle portfolio import
   const handleImportClick = () => {
@@ -229,6 +434,16 @@ function App() {
 
   return (
     <div className="container mx-auto py-6">
+      {/* Confetti keyframes */}
+      <style>{`
+        @keyframes confetti-burst {
+          0% { opacity: 1; transform: translate(-50%, -50%) scale(1) rotate(var(--rotate, 0deg)); }
+          80% { opacity: 1; }
+          100% { opacity: 0; transform: translate(calc(-50% + var(--x, 0px)), calc(-50% + var(--y, 0px))) scale(0.7) rotate(var(--rotate, 0deg)); }
+        }
+      `}</style>
+      {/* Confetti burst overlay */}
+      <ConfettiBurst trigger={confettiTrigger} x={confettiPos.x} y={confettiPos.y} />
       {/* Toast container */}
       <Toaster />
       
@@ -279,13 +494,24 @@ function App() {
           
           <div className="flex-1 flex justify-end">
             <a 
+              ref={srvBtnRef}
               href="https://siliconroundabout.ventures"
               target="_blank"
               rel="noopener noreferrer"
               className="group inline-flex items-center gap-1.5 rounded-md bg-blue-50 px-3 py-1.5 text-sm font-medium text-blue-600 transition-colors hover:bg-blue-100"
+              onMouseEnter={e => {
+                if (srvBtnRef.current) {
+                  const rect = srvBtnRef.current.getBoundingClientRect();
+                  setConfettiPos({
+                    x: rect.left + rect.width / 2,
+                    y: rect.top + rect.height / 2 + window.scrollY
+                  });
+                  setConfettiTrigger(t => !t);
+                }
+              }}
             >
               Silicon Roundabout Ventures
-              <Sparkles className="h-3.5 w-3.5 opacity-70 group-hover:animate-ping" />
+              <ExternalLink className="h-4 w-4 ml-1" />
             </a>
           </div>
         </div>
@@ -380,11 +606,289 @@ function App() {
 
                 <TabsContent value="portfolio">
                   <div className="space-y-4">
-                    <h2 className="text-lg font-semibold">Your Portfolio Companies</h2>
-                    <p className="text-sm text-gray-500">
+                    <div className="flex items-center justify-between mb-2">
+                      <h2 className="text-lg font-semibold">Your Portfolio Companies</h2>
+                      <Button
+                        variant={showPortfolioOverview ? 'default' : 'outline'}
+                        size="sm"
+                        onClick={() => {
+                          if (portfolioCompanies.length === 0) {
+                            toast.error('Portfolio is empty. Add companies before viewing the overview.');
+                            return;
+                          }
+                          setShowPortfolioOverview(v => !v);
+                        }}
+                      >
+                        {showPortfolioOverview ? 'Back to Results' : 'Portfolio Overview'}
+                      </Button>
+                    </div>
+                    <p className="text-sm text-gray-500 mb-2">
                       Add your portfolio companies to simulate their growth
                     </p>
                     <PortfolioManager />
+                    <Card className="p-4 mt-0">
+                      <div className="mb-3">
+                        <h3 className="text-sm font-medium">Follow-ons (Seed-A)</h3>
+                        <div className="flex items-center mt-2">
+                          <label className="relative inline-flex items-center cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={followOn.inputMode === 'ownership'}
+                              onChange={e => setFollowOn(f => ({ ...f, inputMode: e.target.checked ? 'ownership' : 'checkSize' }))}
+                              className="sr-only peer"
+                            />
+                            <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-blue-500 rounded-full peer peer-checked:bg-blue-600 transition-all duration-200"></div>
+                            <div className="absolute left-0.5 top-0.5 w-5 h-5 bg-white rounded-full shadow-md transition-transform duration-200 peer-checked:translate-x-5"></div>
+                          </label>
+                        </div>
+                      </div>
+                      <div className="grid grid-cols-2 gap-3 mb-3">
+                        <div>
+                          <label className="text-xs font-medium block mb-1">Avg Check Size ($MM)</label>
+                          <Input
+                            type="number"
+                            step="0.01"
+                            min="0"
+                            value={followOn.avgCheck}
+                            readOnly={followOn.inputMode === 'ownership'}
+                            className={followOn.inputMode === 'ownership' ? 'bg-gray-100 cursor-not-allowed' : ''}
+                            onChange={e => {
+                              const avgCheck = parseFloat(e.target.value) || 0;
+                              let ownership = followOn.ownership;
+                              let avgVal = followOn.avgVal;
+                              if (followOn.inputMode === 'checkSize') {
+                                ownership = avgVal > 0 ? (avgCheck / avgVal) * 100 : 0;
+                              }
+                              setFollowOn(f => ({ ...f, avgCheck, ownership }));
+                            }}
+                          />
+                        </div>
+                        <div>
+                          <label className="text-xs font-medium block mb-1">Avg Valuation ($MM)</label>
+                          <Input
+                            type="number"
+                            step="0.01"
+                            min="0"
+                            value={followOn.avgVal}
+                            onChange={e => {
+                              const avgVal = parseFloat(e.target.value) || 0;
+                              let avgCheck = followOn.avgCheck;
+                              let ownership = followOn.ownership;
+                              if (followOn.inputMode === 'checkSize') {
+                                ownership = avgVal > 0 ? (avgCheck / avgVal) * 100 : 0;
+                              } else {
+                                avgCheck = (ownership / 100) * avgVal;
+                              }
+                              setFollowOn(f => ({ ...f, avgVal, avgCheck, ownership }));
+                            }}
+                          />
+                        </div>
+                        {followOn.inputMode === 'checkSize' ? (
+                          <>
+                            <div>
+                              <label className="text-xs font-medium block mb-1">Ownership (%)</label>
+                              <Input
+                                type="number"
+                                value={followOn.ownership.toFixed(2)}
+                                readOnly
+                                className="bg-gray-100 cursor-not-allowed"
+                              />
+                            </div>
+                          </>
+                        ) : (
+                          <>
+                            <div>
+                              <label className="text-xs font-medium block mb-1">Ownership (%)</label>
+                              <Input
+                                type="number"
+                                step="0.01"
+                                min="0"
+                                max="100"
+                                value={followOn.ownership}
+                                onChange={e => {
+                                  const ownership = parseFloat(e.target.value) || 0;
+                                  const avgCheck = (ownership / 100) * followOn.avgVal;
+                                  setFollowOn(f => ({ ...f, ownership, avgCheck }));
+                                }}
+                              />
+                            </div>
+                          </>
+                        )}
+                      </div>
+                      <div className="mb-2">
+                        <label className="text-xs font-medium block mb-1">Select Seed Companies for Follow-ons</label>
+                        <div className="max-h-40 overflow-y-auto border rounded p-2 bg-gray-50">
+                          {portfolioCompanies.filter(c => c.stage === 'Seed').length === 0 ? (
+                            <div className="text-xs text-gray-400">No Seed companies in portfolio.</div>
+                          ) : (
+                            portfolioCompanies.filter(c => c.stage === 'Seed').map((company, idx) => (
+                              <div key={company.id} className="flex items-center gap-2 mb-1">
+                                <input
+                                  type="checkbox"
+                                  checked={!!(followOn.selected && followOn.selected[company.id])}
+                                  onChange={e => {
+                                    const selected = { ...(followOn.selected || {}) };
+                                    if (e.target.checked) {
+                                      selected[company.id] = 1;
+                                    } else {
+                                      delete selected[company.id];
+                                    }
+                                    setFollowOn(f => ({ ...f, selected }));
+                                  }}
+                                />
+                                <span className="text-xs font-medium flex-1">{company.name}</span>
+                              </div>
+                            ))
+                          )}
+                        </div>
+                      </div>
+                      {/* Number of investments above capital deployed */}
+                      <div className="text-xs text-gray-700 mt-2 text-right">
+                        Number of Investments: <span className="font-semibold">{(() => {
+                          const selected = followOn.selected || {};
+                          return Object.values(selected).reduce((a: number, b: number) => a + (typeof b === 'number' ? b : 0), 0);
+                        })()}</span>
+                      </div>
+                      <div className="text-xs text-gray-700 text-right">
+                        Capital Deployed: <span className="font-semibold">{(() => {
+                          const selected = followOn.selected || {};
+                          const numInvestments = Object.values(selected).reduce((a: number, b: number) => a + (typeof b === 'number' ? b : 0), 0);
+                          return (followOn.avgCheck * numInvestments).toFixed(2);
+                        })()} $MM</span>
+                      </div>
+                    </Card>
+                    {/* Follow-ons (A-B) */}
+                    <Card className="p-4 mt-0">
+                      <div className="mb-3">
+                        <h3 className="text-sm font-medium">Follow-ons (A-B)</h3>
+                        <div className="flex items-center mt-2">
+                          <label className="relative inline-flex items-center cursor-pointer">
+                            <input
+                              type="checkbox"
+                              checked={followOnAB.inputMode === 'ownership'}
+                              onChange={e => setFollowOnAB(f => ({ ...f, inputMode: e.target.checked ? 'ownership' : 'checkSize' }))}
+                              className="sr-only peer"
+                            />
+                            <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none peer-focus:ring-2 peer-focus:ring-blue-500 rounded-full peer peer-checked:bg-blue-600 transition-all duration-200"></div>
+                            <div className="absolute left-0.5 top-0.5 w-5 h-5 bg-white rounded-full shadow-md transition-transform duration-200 peer-checked:translate-x-5"></div>
+                          </label>
+                        </div>
+                      </div>
+                      <div className="grid grid-cols-2 gap-3 mb-3">
+                        <div>
+                          <label className="text-xs font-medium block mb-1">Avg Check Size ($MM)</label>
+                          <Input
+                            type="number"
+                            step="0.01"
+                            min="0"
+                            value={followOnAB.avgCheck}
+                            readOnly={followOnAB.inputMode === 'ownership'}
+                            className={followOnAB.inputMode === 'ownership' ? 'bg-gray-100 cursor-not-allowed' : ''}
+                            onChange={e => {
+                              const avgCheck = parseFloat(e.target.value) || 0;
+                              let ownership = followOnAB.ownership;
+                              let avgVal = followOnAB.avgVal;
+                              if (followOnAB.inputMode === 'checkSize') {
+                                ownership = avgVal > 0 ? (avgCheck / avgVal) * 100 : 0;
+                              }
+                              setFollowOnAB(f => ({ ...f, avgCheck, ownership }));
+                            }}
+                          />
+                        </div>
+                        <div>
+                          <label className="text-xs font-medium block mb-1">Avg Valuation ($MM)</label>
+                          <Input
+                            type="number"
+                            step="0.01"
+                            min="0"
+                            value={followOnAB.avgVal}
+                            onChange={e => {
+                              const avgVal = parseFloat(e.target.value) || 0;
+                              let avgCheck = followOnAB.avgCheck;
+                              let ownership = followOnAB.ownership;
+                              if (followOnAB.inputMode === 'checkSize') {
+                                ownership = avgVal > 0 ? (avgCheck / avgVal) * 100 : 0;
+                              } else {
+                                avgCheck = (ownership / 100) * avgVal;
+                              }
+                              setFollowOnAB(f => ({ ...f, avgVal, avgCheck, ownership }));
+                            }}
+                          />
+                        </div>
+                        {followOnAB.inputMode === 'checkSize' ? (
+                          <>
+                            <div>
+                              <label className="text-xs font-medium block mb-1">Ownership (%)</label>
+                              <Input
+                                type="number"
+                                value={followOnAB.ownership.toFixed(2)}
+                                readOnly
+                                className="bg-gray-100 cursor-not-allowed"
+                              />
+                            </div>
+                          </>
+                        ) : (
+                          <>
+                            <div>
+                              <label className="text-xs font-medium block mb-1">Ownership (%)</label>
+                              <Input
+                                type="number"
+                                step="0.01"
+                                min="0"
+                                max="100"
+                                value={followOnAB.ownership}
+                                onChange={e => {
+                                  const ownership = parseFloat(e.target.value) || 0;
+                                  const avgCheck = (ownership / 100) * followOnAB.avgVal;
+                                  setFollowOnAB(f => ({ ...f, ownership, avgCheck }));
+                                }}
+                              />
+                            </div>
+                          </>
+                        )}
+                      </div>
+                      <div className="mb-2">
+                        <label className="text-xs font-medium block mb-1">Select Series A Companies for Follow-ons</label>
+                        <div className="max-h-40 overflow-y-auto border rounded p-2 bg-gray-50">
+                          {portfolioCompanies.filter(c => c.stage === 'Series A').length === 0 ? (
+                            <div className="text-xs text-gray-400">No Series A companies in portfolio.</div>
+                          ) : (
+                            portfolioCompanies.filter(c => c.stage === 'Series A').map((company, idx) => (
+                              <div key={company.id} className="flex items-center gap-2 mb-1">
+                                <input
+                                  type="checkbox"
+                                  checked={!!(followOnAB.selected && followOnAB.selected[company.id])}
+                                  onChange={e => {
+                                    const selected = { ...(followOnAB.selected || {}) };
+                                    if (e.target.checked) {
+                                      selected[company.id] = 1;
+                                    } else {
+                                      delete selected[company.id];
+                                    }
+                                    setFollowOnAB(f => ({ ...f, selected }));
+                                  }}
+                                />
+                                <span className="text-xs font-medium flex-1">{company.name}</span>
+                              </div>
+                            ))
+                          )}
+                        </div>
+                      </div>
+                      {/* Number of investments above capital deployed */}
+                      <div className="text-xs text-gray-700 mt-2 text-right">
+                        Number of Investments: <span className="font-semibold">{(() => {
+                          const selected = followOnAB.selected || {};
+                          return Object.values(selected).reduce((a: number, b: number) => a + (typeof b === 'number' ? b : 0), 0);
+                        })()}</span>
+                      </div>
+                      <div className="text-xs text-gray-700 text-right">
+                        Capital Deployed: <span className="font-semibold">{(() => {
+                          const selected = followOnAB.selected || {};
+                          const numInvestments = Object.values(selected).reduce((a: number, b: number) => a + (typeof b === 'number' ? b : 0), 0);
+                          return (followOnAB.avgCheck * numInvestments).toFixed(2);
+                        })()} $MM</span>
+                      </div>
+                    </Card>
                   </div>
                 </TabsContent>
 
@@ -857,280 +1361,306 @@ function App() {
           </div>
         </Card>
 
-        {/* Results Panel */}
-        <Card className="p-4 md:col-span-2">
-          <div className="flex justify-between items-center mb-4">
-            <h2 className="text-xl font-semibold">Simulation Results</h2>
-            {results && <SaveSimulationResults resultsRef={resultsRef} />}
-          </div>
-
-          {isSimulating ? (
-            <div className="flex flex-col items-center justify-center h-[500px]">
-              <div className="animate-pulse text-lg mb-4">Simulating...</div>
-              <div className="w-full max-w-md mb-4">
-                <div className="mb-2 text-sm text-center">
-                  {Math.round(simulationProgress)}% complete
-                </div>
-                <div className="w-full bg-gray-200 rounded-full h-2.5">
-                  <div 
-                    className="bg-blue-600 h-2.5 rounded-full" 
-                    style={{ width: `${simulationProgress}%` }}
-                  ></div>
-                </div>
-              </div>
-              <p className="text-sm text-gray-500 text-center max-w-md">
-                Running {useVCFundStore.getState().numSimulations} simulations to calculate fund performance metrics
-              </p>
-            </div>
-          ) : results ? (
-            <div className="space-y-6" ref={resultsRef} id="simulation-results">
-              {/* Summary metrics */}
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                <div className="bg-gray-100 p-3 rounded-lg">
-                  <div className="text-sm text-gray-500">Paid-in ($MM)</div>
-                  <div className="text-xl font-semibold">
-                    {results.paidIn.toFixed(2)}
-                  </div>
-                </div>
-                <div className="bg-gray-100 p-3 rounded-lg">
-                  <div className="text-sm text-gray-500">Distributed ($MM)</div>
-                  <div className="text-xl font-semibold">
-                    {results.distributed.toFixed(2)}
-                  </div>
-                </div>
-                <div className="bg-gray-100 p-3 rounded-lg">
-                  <div className="text-sm text-gray-500">MOIC</div>
-                  <div className="text-xl font-semibold">
-                    {results.meanMoic.toFixed(2)}
-                  </div>
-                </div>
-                <div className="bg-gray-100 p-3 rounded-lg">
-                  <div className="text-sm text-gray-500">Mean IRR %</div>
-                  <div className="text-xl font-semibold">
-                    {results.meanIrr.toFixed(2)}%
-                  </div>
-                </div>
-              </div>
-
-              <div className="grid grid-cols-3 gap-4">
-                <div className="bg-gray-100 p-3 rounded-lg">
-                  <div className="text-sm text-gray-500">Net DPI</div>
-                  <div className="text-xl font-semibold">
-                    {(results.distributed / results.paidIn).toFixed(
-                      2
-                    )}
-                  </div>
-                </div>
-                <div className="bg-gray-100 p-3 rounded-lg">
-                  <div className="text-sm text-gray-500"># Investments</div>
-                  <div className="text-xl font-semibold">
-                    {results.numInvestments}
-                  </div>
-                </div>
-                <div className="bg-gray-100 p-3 rounded-lg">
-                  <div className="text-sm text-gray-500">Mgmt Fees ($MM)</div>
-                  <div className="text-xl font-semibold">
-                    ${results.managementFees.toFixed(2)}
-                  </div>
-                </div>
-              </div>
-
-              {/* MOIC Distribution */}
-              <div>
-                <h3 className="text-lg font-semibold mb-2">Distribution of Fund MOIC</h3>
-                <div className="min-h-[200px] w-full">
-                  <ResponsiveContainer width="100%" height={200}>
-                    <BarChart data={getMoicChartData()}>
-                      <CartesianGrid strokeDasharray="3 3" />
-                      <XAxis dataKey="range" />
-                      <YAxis />
-                      <Tooltip />
-                      <Legend />
-                      <Bar
-                        dataKey="count"
-                        name="Number of Simulations"
-                        fill="#8884d8"
-                      >
-                        {getMoicChartData().map((entry, index) => (
-                          <Cell
-                            key={`cell-${index}`}
-                            fill={index % 2 === 0 ? "#8884d8" : "#82ca9d"}
-                          />
-                        ))}
-                      </Bar>
-                    </BarChart>
-                  </ResponsiveContainer>
-                </div>
-              </div>
-
-              {/* Investment Performance */}
-              <div>
-                <div className="flex items-center mb-2 gap-4">
-                  <h3 className="text-lg font-semibold">
-                    Entry Capital vs. Exit Value per Investment (Simulation Details)
-                  </h3>
-                  <div className="flex items-center gap-2">
-                    <label htmlFor="sim-select" className="text-sm">Simulation:</label>
-                    <select
-                      id="sim-select"
-                      className="border rounded px-2 py-1 text-sm"
-                      value={selectedSim}
-                      onChange={e => setSelectedSim(Number(e.target.value))}
-                    >
-                      {Array.from({ length: useVCFundStore.getState().numSimulations }, (_, i) => (
-                        <option key={i + 1} value={i + 1}>{i + 1}</option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
-                <div className="min-h-[300px] w-full">
-                  <ResponsiveContainer width="100%" height={300}>
-                    <BarChart
-                      data={(() => {
-                        // Group investments by simulation
-                        const simMap = new Map();
-                        results.investments.forEach(inv => {
-                          const parts = String(inv.id).split('-');
-                          const simIdx = parts[0] ? parseInt(parts[0], 10) : 1;
-                          if (!simMap.has(simIdx)) simMap.set(simIdx, []);
-                          simMap.get(simIdx).push(inv);
-                        });
-                        // Only show up to floor(numInvestments)
-                        const numToShow = Math.floor(results.numInvestments);
-                        const invs = simMap.get(selectedSim) || [];
-                        // For portfolio mode, build a map from company id to name
-                        let companyNameMap: Record<string, string> = {};
-                        if (isPortfolioMode) {
-                          const pcs = useVCFundStore.getState().portfolioCompanies;
-                          pcs.forEach(pc => { companyNameMap[String(pc.id)] = pc.name; });
-                        }
-                        return invs.slice(0, numToShow).map((inv, idx) => ({
-                          id: idx + 1,
-                          entry: inv.entryAmount,
-                          exit: inv.exitAmount,
-                          gain: Math.max(0, inv.exitAmount - inv.entryAmount),
-                          loss: Math.min(0, inv.exitAmount - inv.entryAmount),
-                        }));
-                      })()}
-                    >
-                      <CartesianGrid strokeDasharray="3 3" />
-                      <XAxis dataKey="id" />
-                      <YAxis />
-                      <Tooltip />
-                      <Legend />
-                      <Bar dataKey="entry" fill="#8884d8" name="Entry" />
-                      <Bar dataKey="gain" fill="#82ca9d" name="Gain" stackId="stack" />
-                      <Bar dataKey="loss" fill="#ff8042" name="Loss" stackId="stack" />
-                    </BarChart>
-                  </ResponsiveContainer>
-                </div>
-              </div>
-
-              {/* Investments Table */}
-              <div>
-                <h3 className="text-lg font-semibold mb-2">
-                  {isPortfolioMode ? "Portfolio Companies Simulation" : "Sample Simulation Investments (Selected Simulation)"}
-                </h3>
-                <div className="overflow-x-auto">
-                  <table className="w-full border-collapse">
-                    <thead>
-                      <tr className="bg-gray-100">
-                        <th className="px-4 py-2 text-left">
-                          {isPortfolioMode ? "Company" : "Investment #"}
-                        </th>
-                        <th className="px-4 py-2 text-left">Entry Stage</th>
-                        <th className="px-4 py-2 text-left">Entry Amount ($MM)</th>
-                        <th className="px-4 py-2 text-left">Exit Stage</th>
-                        <th className="px-4 py-2 text-left">Exit Amount ($MM)</th>
-                        <th className="px-4 py-2 text-left">Multiple</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {(() => {
-                        // Group investments by simulation
-                        const simMap = new Map();
-                        results.investments.forEach(inv => {
-                          const parts = String(inv.id).split('-');
-                          const simIdx = parts[0] ? parseInt(parts[0], 10) : 1;
-                          if (!simMap.has(simIdx)) simMap.set(simIdx, []);
-                          simMap.get(simIdx).push(inv);
-                        });
-                        const numToShow = Math.floor(results.numInvestments);
-                        const invs = simMap.get(selectedSim) || [];
-                        // For portfolio mode, build a map from company id to name
-                        let companyNameMap: Record<string, string> = {};
-                        if (isPortfolioMode) {
-                          const pcs = useVCFundStore.getState().portfolioCompanies;
-                          pcs.forEach(pc => { companyNameMap[String(pc.id)] = pc.name; });
-                        }
-                        return invs.slice(0, numToShow).map((inv, idx) => {
-                          const entryStage = inv.entryStage || "";
-                          const exitStage = inv.exitStage || "";
-                          let companyLabel = idx + 1;
-                          if (isPortfolioMode) {
-                            // inv.id is in the format 'sim-companyId'
-                            const idParts = String(inv.id).split('-');
-                            const companyId = idParts.length > 1 ? idParts.slice(1).join('-') : idParts[0];
-                            companyLabel = companyNameMap[companyId] || companyLabel;
-                          }
-                          return (
-                            <tr key={idx} className="border-b border-gray-200">
-                              <td className="px-4 py-2">{companyLabel}</td>
-                              <td className="px-4 py-2"><StageBadge stage={entryStage} /></td>
-                              <td className="px-4 py-2">${inv.entryAmount.toFixed(2)}</td>
-                              <td className="px-4 py-2"><StageBadge stage={exitStage} /></td>
-                              <td className="px-4 py-2">${inv.exitAmount.toFixed(2)}</td>
-                              <td className="px-4 py-2">{inv.entryAmount > 0 ? (inv.exitAmount / inv.entryAmount).toFixed(2) : "N/A"}</td>
-                            </tr>
-                          );
-                        });
-                      })()}
-                    </tbody>
-                  </table>
-                </div>
-              </div>
-            </div>
+        {/* Results Panel or Portfolio Overview */}
+        <div className="md:col-span-2">
+          {isPortfolioMode && showPortfolioOverview ? (
+            <Card className="p-4">
+              <h2 className="text-xl font-semibold mb-4">Portfolio Overview</h2>
+              <PortfolioOverviewPanel companies={portfolioCompanies} followOn={followOn} followOnAB={followOnAB} />
+            </Card>
           ) : (
-            <div className="flex flex-col items-center justify-center h-[500px] text-center">
-              <p className="text-gray-500 mb-4">Run a simulation to see results</p>
-              <p className="text-sm text-gray-500 max-w-md">
-                {isPortfolioMode 
-                  ? "Add your portfolio companies and click 'Run Simulation' to generate performance metrics"
-                  : "Configure your fund parameters on the left panel and click 'Run Simulation' to generate portfolio performance metrics"
-                }
-              </p>
-            </div>
+            <Card className="p-4">
+              <div className="flex justify-between items-center mb-4">
+                <h2 className="text-xl font-semibold">Simulation Results</h2>
+                {results && <SaveSimulationResults resultsRef={resultsRef} />}
+              </div>
+
+              {isSimulating ? (
+                <div className="flex flex-col items-center justify-center h-[500px]">
+                  <div className="animate-pulse text-lg mb-4">Simulating...</div>
+                  <div className="w-full max-w-md mb-4">
+                    <div className="mb-2 text-sm text-center">
+                      {Math.round(simulationProgress)}% complete
+                    </div>
+                    <div className="w-full bg-gray-200 rounded-full h-2.5">
+                      <div 
+                        className="bg-blue-600 h-2.5 rounded-full" 
+                        style={{ width: `${simulationProgress}%` }}
+                      ></div>
+                    </div>
+                  </div>
+                  <p className="text-sm text-gray-500 text-center max-w-md">
+                    Running {useVCFundStore.getState().numSimulations} simulations to calculate fund performance metrics
+                  </p>
+                </div>
+              ) : results ? (
+                <div className="space-y-6" ref={resultsRef} id="simulation-results">
+                  {/* Summary metrics */}
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                    <div className="bg-gray-100 p-3 rounded-lg">
+                      <div className="text-sm text-gray-500">Paid-in ($MM)</div>
+                      <div className="text-xl font-semibold">
+                        {results.paidIn.toFixed(2)}
+                      </div>
+                    </div>
+                    <div className="bg-gray-100 p-3 rounded-lg">
+                      <div className="text-sm text-gray-500">Distributed ($MM)</div>
+                      <div className="text-xl font-semibold">
+                        {results.distributed.toFixed(2)}
+                      </div>
+                    </div>
+                    <div className="bg-gray-100 p-3 rounded-lg">
+                      <div className="text-sm text-gray-500">MOIC</div>
+                      <div className="text-xl font-semibold">
+                        {results.meanMoic.toFixed(2)}
+                      </div>
+                    </div>
+                    <div className="bg-gray-100 p-3 rounded-lg">
+                      <div className="text-sm text-gray-500">Mean IRR %</div>
+                      <div className="text-xl font-semibold">
+                        {results.meanIrr.toFixed(2)}%
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-3 gap-4">
+                    <div className="bg-gray-100 p-3 rounded-lg">
+                      <div className="text-sm text-gray-500">Net DPI</div>
+                      <div className="text-xl font-semibold">
+                        {(results.distributed / results.paidIn).toFixed(
+                          2
+                        )}
+                      </div>
+                    </div>
+                    <div className="bg-gray-100 p-3 rounded-lg">
+                      <div className="text-sm text-gray-500"># Investments</div>
+                      <div className="text-xl font-semibold">
+                        {results.numInvestments}
+                      </div>
+                    </div>
+                    <div className="bg-gray-100 p-3 rounded-lg">
+                      <div className="text-sm text-gray-500">Mgmt Fees ($MM)</div>
+                      <div className="text-xl font-semibold">
+                        ${results.managementFees.toFixed(2)}
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* MOIC Distribution */}
+                  <div>
+                    <h3 className="text-lg font-semibold mb-2">Distribution of Fund MOIC</h3>
+                    <div className="min-h-[200px] w-full">
+                      <ResponsiveContainer width="100%" height={200}>
+                        <BarChart data={getMoicChartData()}>
+                          <CartesianGrid strokeDasharray="3 3" />
+                          <XAxis dataKey="range" />
+                          <YAxis />
+                          <Tooltip />
+                          <Legend />
+                          <Bar
+                            dataKey="count"
+                            name="Number of Simulations"
+                            fill="#8884d8"
+                          >
+                            {getMoicChartData().map((entry, index) => (
+                              <Cell
+                                key={`cell-${index}`}
+                                fill={index % 2 === 0 ? "#8884d8" : "#82ca9d"}
+                              />
+                            ))}
+                          </Bar>
+                        </BarChart>
+                      </ResponsiveContainer>
+                    </div>
+                  </div>
+
+                  {/* Investment Performance */}
+                  <div>
+                    <div className="flex items-center mb-2 gap-4">
+                      <h3 className="text-lg font-semibold">
+                        Entry Capital vs. Exit Value per Investment (Simulation Details)
+                      </h3>
+                      <div className="flex items-center gap-2">
+                        <label htmlFor="sim-select" className="text-sm">Simulation:</label>
+                        <select
+                          id="sim-select"
+                          className="border rounded px-2 py-1 text-sm"
+                          value={selectedSim}
+                          onChange={e => setSelectedSim(Number(e.target.value))}
+                        >
+                          {Array.from({ length: useVCFundStore.getState().numSimulations }, (_, i) => (
+                            <option key={i + 1} value={i + 1}>{i + 1}</option>
+                          ))}
+                        </select>
+                      </div>
+                    </div>
+                    <div className="min-h-[300px] w-full">
+                      <ResponsiveContainer width="100%" height={300}>
+                        <BarChart
+                          data={(() => {
+                            // Group investments by simulation
+                            const simMap = new Map();
+                            results.investments.forEach(inv => {
+                              const parts = String(inv.id).split('-');
+                              const simIdx = parts[0] ? parseInt(parts[0], 10) : 1;
+                              if (!simMap.has(simIdx)) simMap.set(simIdx, []);
+                              simMap.get(simIdx).push(inv);
+                            });
+                            // Only show up to floor(numInvestments)
+                            const numToShow = Math.floor(results.numInvestments);
+                            const invs = simMap.get(selectedSim) || [];
+                            // For portfolio mode, build a map from company id to name
+                            let companyNameMap: Record<string, string> = {};
+                            if (isPortfolioMode) {
+                              const pcs = useVCFundStore.getState().portfolioCompanies;
+                              pcs.forEach(pc => { companyNameMap[String(pc.id)] = pc.name; });
+                            }
+                            return invs.slice(0, numToShow).map((inv: Investment, idx: number) => ({
+                              id: idx + 1,
+                              entry: inv.entryAmount,
+                              exit: inv.exitAmount,
+                              gain: Math.max(0, inv.exitAmount - inv.entryAmount),
+                              loss: Math.min(0, inv.exitAmount - inv.entryAmount),
+                            }));
+                          })()}
+                        >
+                          <CartesianGrid strokeDasharray="3 3" />
+                          <XAxis dataKey="id" />
+                          <YAxis />
+                          <Tooltip />
+                          <Legend />
+                          <Bar dataKey="entry" fill="#8884d8" name="Entry" />
+                          <Bar dataKey="gain" fill="#82ca9d" name="Gain" stackId="stack" />
+                          <Bar dataKey="loss" fill="#ff8042" name="Loss" stackId="stack" />
+                        </BarChart>
+                      </ResponsiveContainer>
+                    </div>
+                  </div>
+
+                  {/* Investments Table */}
+                  <div>
+                    <h3 className="text-lg font-semibold mb-2">
+                      {isPortfolioMode ? "Portfolio Companies Simulation" : "Sample Simulation Investments (Selected Simulation)"}
+                    </h3>
+                    <div className="overflow-x-auto">
+                      <table className="w-full border-collapse">
+                        <thead>
+                          <tr className="bg-gray-100">
+                            <th className="px-4 py-2 text-left">
+                              {isPortfolioMode ? "Company" : "Investment #"}
+                            </th>
+                            <th className="px-4 py-2 text-left">Entry Stage</th>
+                            <th className="px-4 py-2 text-left">Entry Amount ($MM)</th>
+                            <th className="px-4 py-2 text-left">Exit Stage</th>
+                            <th className="px-4 py-2 text-left">Exit Amount ($MM)</th>
+                            <th className="px-4 py-2 text-left">Multiple</th>
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {(() => {
+                            // Group investments by simulation
+                            const simMap = new Map();
+                            results.investments.forEach(inv => {
+                              const parts = String(inv.id).split('-');
+                              const simIdx = parts[0] ? parseInt(parts[0], 10) : 1;
+                              if (!simMap.has(simIdx)) simMap.set(simIdx, []);
+                              simMap.get(simIdx).push(inv);
+                            });
+                            const numToShow = Math.floor(results.numInvestments);
+                            const invs = simMap.get(selectedSim) || [];
+                            // For portfolio mode, build a map from company id to name
+                            let companyNameMap: Record<string, string> = {};
+                            if (isPortfolioMode) {
+                              const pcs = useVCFundStore.getState().portfolioCompanies;
+                              pcs.forEach(pc => { companyNameMap[String(pc.id)] = pc.name; });
+                            }
+                            return invs.slice(0, numToShow).map((inv: Investment, idx: number) => {
+                              const entryStage = inv.entryStage || "";
+                              const exitStage = inv.exitStage || "";
+                              let companyLabel = idx + 1;
+                              if (isPortfolioMode) {
+                                // inv.id is in the format 'sim-companyId'
+                                const idParts = String(inv.id).split('-');
+                                const companyId = idParts.length > 1 ? idParts.slice(1).join('-') : idParts[0];
+                                companyLabel = companyNameMap[companyId] || companyLabel;
+                              }
+                              return (
+                                <tr key={idx} className="border-b border-gray-200">
+                                  <td className="px-4 py-2">{companyLabel}</td>
+                                  <td className="px-4 py-2"><StageBadge stage={entryStage} /></td>
+                                  <td className="px-4 py-2">${inv.entryAmount.toFixed(2)}</td>
+                                  <td className="px-4 py-2"><StageBadge stage={exitStage} /></td>
+                                  <td className="px-4 py-2">${inv.exitAmount.toFixed(2)}</td>
+                                  <td className="px-4 py-2">{inv.entryAmount > 0 ? (inv.exitAmount / inv.entryAmount).toFixed(2) : "N/A"}</td>
+                                </tr>
+                              );
+                            });
+                          })()}
+                        </tbody>
+                      </table>
+                    </div>
+                  </div>
+                </div>
+              ) : (
+                <div className="flex flex-col items-center justify-center h-[500px] text-center">
+                  <p className="text-gray-500 mb-4">Run a simulation to see results</p>
+                  <p className="text-sm text-gray-500 max-w-md">
+                    {isPortfolioMode 
+                      ? "Add your portfolio companies and click 'Run Simulation' to generate performance metrics"
+                      : "Configure your fund parameters on the left panel and click 'Run Simulation' to generate portfolio performance metrics"
+                    }
+                  </p>
+                </div>
+              )}
+            </Card>
           )}
-        </Card>
+        </div>
       </div>
 
       {/* Portfolio Password Dialog */}
       <Dialog open={showPasswordDialog} onOpenChange={setShowPasswordDialog}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle>Enter Portfolio Mode Password</DialogTitle>
+            <DialogTitle>Portfolio mode</DialogTitle>
           </DialogHeader>
           <div className="py-2">
-            <Input
-              type="password"
-              placeholder="Password"
-              value={passwordInput}
-              onChange={e => setPasswordInput(e.target.value)}
-              onKeyDown={e => {
-                if (e.key === 'Enter') {
-                  if (passwordInput === 'SRV-admin') {
-                    setPortfolioUnlocked(true);
-                    setIsPortfolioMode(true);
-                    setShowPasswordDialog(false);
-                    setPasswordInput("");
-                    toast.success('Portfolio mode unlocked!');
-                  } else {
-                    toast.error('Incorrect password.');
+            <div className="relative">
+              <Input
+                type={showPassword ? "text" : "password"}
+                placeholder="Password"
+                value={passwordInput}
+                onChange={e => setPasswordInput(e.target.value)}
+                onKeyDown={e => {
+                  if (e.key === 'Enter') {
+                    if (passwordInput === 'SRV-admin') {
+                      setPortfolioUnlocked(true);
+                      setIsPortfolioMode(true);
+                      setShowPasswordDialog(false);
+                      setPasswordInput("");
+                      toast.success('Portfolio mode unlocked!');
+                    } else {
+                      toast.error('Incorrect password.');
+                    }
                   }
-                }
-              }}
-              autoFocus
-            />
+                }}
+                autoFocus
+              />
+              <button
+                type="button"
+                aria-label={showPassword ? "Hide password" : "Show password"}
+                className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-700"
+                onClick={() => setShowPassword(prev => !prev)}
+                tabIndex={-1}
+                style={{ background: 'none', border: 'none', padding: 0 }}
+              >
+                {showPassword ? (
+                  <EyeOff className="h-4 w-4" />
+                ) : (
+                  <Eye className="h-4 w-4" />
+                )}
+              </button>
+            </div>
+            <div className="text-xs text-gray-500 mt-2">This feature is in beta.</div>
           </div>
           <DialogFooter>
             <button
