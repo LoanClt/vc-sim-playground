@@ -15,6 +15,7 @@ import {
 import { toast } from 'sonner';
 import { cn } from '../lib/utils';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from './ui/dialog';
+import { SimulatorControl } from './simulator';
 
 // Stage badge variants - more subtle colors
 export const getStageBadgeVariant = (stage: string) => {
@@ -468,11 +469,11 @@ export function PortfolioManager() {
                     <div className="grid grid-cols-2 gap-x-4 gap-y-1 text-sm">
                       <div className="flex justify-between">
                         <span className="text-gray-500">Check Size:</span>
-                        <span>{company.checkSize}$MM</span>
+                        <span>{company.checkSize.toFixed(2)}$MM</span>
                       </div>
                       <div className="flex justify-between">
                         <span className="text-gray-500">Valuation:</span>
-                        <span>{company.valuation}$MM</span>
+                        <span>{company.valuation.toFixed(2)}$MM</span>
                       </div>
                       <div className="flex justify-between">
                         <span className="text-gray-500">Ownership:</span>
