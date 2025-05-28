@@ -3,10 +3,12 @@ import { Card } from './ui/card';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Line, ReferenceLine, Legend, ComposedChart, Area, LineChart } from 'recharts';
-import { Share2, AlertTriangle, BarChart2, TrendingUp, Sigma, Hash, ArrowDownCircle, PercentCircle, Copy } from 'lucide-react';
+import { Share2, AlertTriangle, BarChart2, TrendingUp, Sigma, Hash, ArrowDownCircle, PercentCircle, Copy, Info } from 'lucide-react';
 import { toast } from 'sonner';
 import chroma from 'chroma-js';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from './ui/dialog';
+import { Popover, PopoverTrigger, PopoverContent } from './ui/popover';
+import { Slider } from './ui/slider';
 
 // Bounded Pareto distribution (power law) as in the Python code
 function boundedParetoRVS(alpha: number, xMin: number, xMax: number, size: number): number[] {
@@ -357,17 +359,37 @@ export function MoonfireSimulator({ layout }: { layout?: 'split' }) {
 
   // Implement share parameters logic
   const handleShareParameters = useCallback(() => {
-    const params = new URLSearchParams({
-      alpha: String(alpha),
-      xMin: String(xMin),
-      xMax: String(xMax),
-      nInvestments: String(nInvestments),
-      nSimulations: String(nSimulations),
-    });
-    const url = `${window.location.origin}${window.location.pathname}?${params.toString()}`;
+    const paramObj = {
+      alpha,
+      xMin,
+      xMax,
+      nInvestments,
+      nSimulations,
+    };
+    const encoded = btoa(unescape(encodeURIComponent(JSON.stringify(paramObj))));
+    const url = `${window.location.origin}${window.location.pathname}?params=${encoded}`;
     setShareUrl(url);
     setShareDialogOpen(true);
   }, [alpha, xMin, xMax, nInvestments, nSimulations]);
+
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const url = new URL(window.location.href);
+      const params = url.searchParams.get('params');
+      if (params) {
+        try {
+          const decoded = JSON.parse(decodeURIComponent(escape(atob(params))));
+          if (decoded.alpha) setAlpha(Number(decoded.alpha));
+          if (decoded.xMin) setXMin(Number(decoded.xMin));
+          if (decoded.xMax) setXMax(Number(decoded.xMax));
+          if (decoded.nInvestments) setNInvestments(Number(decoded.nInvestments));
+          if (decoded.nSimulations) setNSimulations(Number(decoded.nSimulations));
+        } catch (e) {
+          // ignore
+        }
+      }
+    }
+  }, []);
 
   if (layout === 'split') {
     return (
@@ -384,15 +406,45 @@ export function MoonfireSimulator({ layout }: { layout?: 'split' }) {
               </Button>
             </div>
             <div className="flex flex-col gap-3">
-              <label className="text-xs font-medium">Pareto α</label>
-              <Input type="number" step="0.01" value={alpha} onChange={e => setAlpha(Number(e.target.value))} />
-              <label className="text-xs font-medium">xMin</label>
-              <Input type="number" step="0.01" value={xMin} onChange={e => setXMin(Number(e.target.value))} />
-              <label className="text-xs font-medium">xMax</label>
-              <Input type="number" step="0.01" value={xMax} onChange={e => setXMax(Number(e.target.value))} />
+              <div className="flex items-center gap-1">
+                <label className="text-xs font-medium">Pareto α</label>
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <span
+                      tabIndex={0}
+                      className="ml-1 inline-flex items-center justify-center w-5 h-5 rounded-full bg-blue-100 text-blue-600 text-xs font-bold cursor-pointer border border-blue-200 select-none"
+                      onMouseEnter={e => e.currentTarget.click()}
+                      onFocus={e => e.currentTarget.click()}
+                      onMouseLeave={e => document.activeElement === e.currentTarget && e.currentTarget.blur()}
+                      aria-label="Alpha info"
+                    >i</span>
+                  </PopoverTrigger>
+                  <PopoverContent className="max-w-xs text-sm p-4" side="right" align="start">
+                    <div className="font-semibold mb-2">What Alpha Controls</div>
+                    <div className="mb-2">Alpha (α) determines the "heaviness" of the tail in the power-law distribution of investment returns.</div>
+                    <div className="font-semibold mb-2">What Different Alpha Values Mean:</div>
+                    <ul className="list-disc pl-4 mb-2">
+                      <li><b>α = 2.5:</b> Lighter tail; extreme returns (e.g., 10x–20x) are less probable, and returns are more evenly distributed across investments.</li>
+                      <li><b>α = 2.0:</b> Heavier tail; a small percentage of investments may yield very high returns (e.g., 100x), significantly impacting overall fund performance.</li>
+                      <li><b>α = 1.5:</b> Very heavy tail; fund performance is dominated by a few exceptionally high-return investments, making it crucial for VCs to identify and invest in potential "unicorns."</li>
+                    </ul>
+                  </PopoverContent>
+                </Popover>
+                <span className="ml-2 text-xs text-gray-500">{alpha.toFixed(2)}</span>
+              </div>
+              <Slider min={1} max={3} step={0.1} value={[alpha]} onValueChange={v => setAlpha(Number(v[0]))} className="mb-2" />
+              <label className="text-xs font-medium">Worst Case Return (%)</label>
+              <span className="ml-2 text-xs text-gray-500">{(xMin * 100).toFixed(0)}%</span>
+              <Slider min={10} max={50} step={1} value={[xMin * 100]} onValueChange={v => setXMin(Number(v[0]) / 100)} className="mb-2" />
+              <label className="text-xs font-medium">Best Case Return (%)</label>
+              <Input type="number" step="0.01" min={0} max={100} value={xMax * 100} onChange={e => setXMax(Number(e.target.value) / 100)} />
               <label className="text-xs font-medium"># Investments</label>
-              <Input type="number" step="1" value={nInvestments} onChange={e => setNInvestments(Number(e.target.value))} />
-              <label className="text-xs font-medium"># Simulations</label>
+              <span className="ml-2 text-xs text-gray-500">{nInvestments}</span>
+              <Slider min={50} max={300} step={1} value={[nInvestments]} onValueChange={v => setNInvestments(Number(v[0]))} className="mb-2" />
+              <div className="flex items-center justify-between">
+                <label className="text-xs font-medium"># Simulations</label>
+                <span className="text-sm font-bold">{nSimulations}</span>
+              </div>
               {simError && (
                 <div className="flex items-center gap-2 mt-1 text-red-600 text-xs bg-red-50 border border-red-200 rounded px-2 py-1">
                   <AlertTriangle className="w-4 h-4 text-red-500" />
@@ -773,23 +825,50 @@ export function MoonfireSimulator({ layout }: { layout?: 'split' }) {
         </p>
         <div className="grid grid-cols-2 gap-4 mb-4">
           <div>
-            <label className="text-xs font-medium">Pareto α</label>
+            <div className="flex items-center gap-1">
+              <label className="text-xs font-medium">Pareto α</label>
+              <Popover>
+                <PopoverTrigger asChild>
+                  <span
+                    tabIndex={0}
+                    className="ml-1 inline-flex items-center justify-center w-5 h-5 rounded-full bg-blue-100 text-blue-600 text-xs font-bold cursor-pointer border border-blue-200 select-none"
+                    onMouseEnter={e => e.currentTarget.click()}
+                    onFocus={e => e.currentTarget.click()}
+                    onMouseLeave={e => document.activeElement === e.currentTarget && e.currentTarget.blur()}
+                    aria-label="Alpha info"
+                  >i</span>
+                </PopoverTrigger>
+                <PopoverContent className="max-w-xs text-sm p-4" side="right" align="start">
+                  <div className="font-semibold mb-2">What Alpha Controls</div>
+                  <div className="mb-2">Alpha (α) determines the "heaviness" of the tail in the power-law distribution of investment returns.</div>
+                  <div className="font-semibold mb-2">What Different Alpha Values Mean:</div>
+                  <ul className="list-disc pl-4 mb-2">
+                    <li><b>α = 2.5:</b> Lighter tail; extreme returns (e.g., 10x–20x) are less probable, and returns are more evenly distributed across investments.</li>
+                    <li><b>α = 2.0:</b> Heavier tail; a small percentage of investments may yield very high returns (e.g., 100x), significantly impacting overall fund performance.</li>
+                    <li><b>α = 1.5:</b> Very heavy tail; fund performance is dominated by a few exceptionally high-return investments, making it crucial for VCs to identify and invest in potential "unicorns."</li>
+                  </ul>
+                </PopoverContent>
+              </Popover>
+            </div>
             <Input type="number" step="0.01" value={alpha} onChange={e => setAlpha(Number(e.target.value))} />
           </div>
           <div>
-            <label className="text-xs font-medium">xMin</label>
-            <Input type="number" step="0.01" value={xMin} onChange={e => setXMin(Number(e.target.value))} />
+            <label className="text-xs font-medium">Worst Case Return (%)</label>
+            <Input type="number" step="0.01" min={0} max={100} value={xMin * 100} onChange={e => setXMin(Number(e.target.value) / 100)} />
           </div>
           <div>
-            <label className="text-xs font-medium">xMax</label>
-            <Input type="number" step="0.01" value={xMax} onChange={e => setXMax(Number(e.target.value))} />
+            <label className="text-xs font-medium">Best Case Return (%)</label>
+            <Input type="number" step="0.01" min={0} max={100} value={xMax * 100} onChange={e => setXMax(Number(e.target.value) / 100)} />
           </div>
           <div>
             <label className="text-xs font-medium"># Investments</label>
             <Input type="number" step="1" value={nInvestments} onChange={e => setNInvestments(Number(e.target.value))} />
           </div>
           <div>
-            <label className="text-xs font-medium"># Simulations</label>
+            <div className="flex items-center justify-between">
+              <label className="text-xs font-medium"># Simulations</label>
+              <span className="text-sm font-bold">{nSimulations}</span>
+            </div>
             {simError && (
               <div className="flex items-center gap-2 mt-1 text-red-600 text-xs bg-red-50 border border-red-200 rounded px-2 py-1">
                 <AlertTriangle className="w-4 h-4 text-red-500" />
