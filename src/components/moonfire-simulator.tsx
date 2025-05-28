@@ -406,42 +406,48 @@ export function MoonfireSimulator({ layout }: { layout?: 'split' }) {
               </Button>
             </div>
             <div className="flex flex-col gap-3">
-              <div className="flex items-center gap-1">
-                <label className="text-xs font-medium">Pareto α</label>
-                <Popover>
-                  <PopoverTrigger asChild>
-                    <span
-                      tabIndex={0}
-                      className="ml-1 inline-flex items-center justify-center w-5 h-5 rounded-full bg-blue-100 text-blue-600 text-xs font-bold cursor-pointer border border-blue-200 select-none"
-                      onMouseEnter={e => e.currentTarget.click()}
-                      onFocus={e => e.currentTarget.click()}
-                      onMouseLeave={e => document.activeElement === e.currentTarget && e.currentTarget.blur()}
-                      aria-label="Alpha info"
-                    >i</span>
-                  </PopoverTrigger>
-                  <PopoverContent className="max-w-xs text-sm p-4" side="right" align="start">
-                    <div className="font-semibold mb-2">What Alpha Controls</div>
-                    <div className="mb-2">Alpha (α) determines the "heaviness" of the tail in the power-law distribution of investment returns.</div>
-                    <div className="font-semibold mb-2">What Different Alpha Values Mean:</div>
-                    <ul className="list-disc pl-4 mb-2">
-                      <li><b>α = 2.5:</b> Lighter tail; extreme returns (e.g., 10x–20x) are less probable, and returns are more evenly distributed across investments.</li>
-                      <li><b>α = 2.0:</b> Heavier tail; a small percentage of investments may yield very high returns (e.g., 100x), significantly impacting overall fund performance.</li>
-                      <li><b>α = 1.5:</b> Very heavy tail; fund performance is dominated by a few exceptionally high-return investments, making it crucial for VCs to identify and invest in potential "unicorns."</li>
-                    </ul>
-                  </PopoverContent>
-                </Popover>
-                <span className="ml-2 text-xs text-gray-500">{alpha.toFixed(2)}</span>
+              <div className="flex items-center justify-between mb-1">
+                <div className="flex items-center gap-1">
+                  <label className="text-xs font-medium">Pareto α</label>
+                  <Popover>
+                    <PopoverTrigger asChild>
+                      <span
+                        tabIndex={0}
+                        className="ml-1 inline-flex items-center justify-center w-5 h-5 rounded-full bg-blue-100 text-blue-600 text-xs font-bold cursor-pointer border border-blue-200 select-none"
+                        onMouseEnter={e => e.currentTarget.click()}
+                        onFocus={e => e.currentTarget.click()}
+                        onMouseLeave={e => document.activeElement === e.currentTarget && e.currentTarget.blur()}
+                        aria-label="Alpha info"
+                      >i</span>
+                    </PopoverTrigger>
+                    <PopoverContent className="max-w-xs text-sm p-4" side="right" align="start">
+                      <div className="font-semibold mb-2">What Alpha Controls</div>
+                      <div className="mb-2">Alpha (α) determines the "heaviness" of the tail in the power-law distribution of investment returns.</div>
+                      <div className="font-semibold mb-2">What Different Alpha Values Mean:</div>
+                      <ul className="list-disc pl-4 mb-2">
+                        <li><b>α = 2.5:</b> Lighter tail; extreme returns (e.g., 10x–20x) are less probable, and returns are more evenly distributed across investments.</li>
+                        <li><b>α = 2.0:</b> Heavier tail; a small percentage of investments may yield very high returns (e.g., 100x), significantly impacting overall fund performance.</li>
+                        <li><b>α = 1.5:</b> Very heavy tail; fund performance is dominated by a few exceptionally high-return investments, making it crucial for VCs to identify and invest in potential "unicorns."</li>
+                      </ul>
+                    </PopoverContent>
+                  </Popover>
+                </div>
+                <span className="text-sm font-bold">{alpha.toFixed(2)}</span>
               </div>
               <Slider min={1} max={3} step={0.1} value={[alpha]} onValueChange={v => setAlpha(Number(v[0]))} className="mb-2" />
-              <label className="text-xs font-medium">Worst Case Return (%)</label>
-              <span className="ml-2 text-xs text-gray-500">{(xMin * 100).toFixed(0)}%</span>
+              <div className="flex items-center justify-between mb-1">
+                <label className="text-xs font-medium">Worst Case Return (%)</label>
+                <span className="text-sm font-bold">{(xMin * 100).toFixed(0)}%</span>
+              </div>
               <Slider min={10} max={50} step={1} value={[xMin * 100]} onValueChange={v => setXMin(Number(v[0]) / 100)} className="mb-2" />
               <label className="text-xs font-medium">Best Case Return (%)</label>
               <Input type="number" step="0.01" min={0} max={100} value={xMax * 100} onChange={e => setXMax(Number(e.target.value) / 100)} />
-              <label className="text-xs font-medium"># Investments</label>
-              <span className="ml-2 text-xs text-gray-500">{nInvestments}</span>
+              <div className="flex items-center justify-between mb-1">
+                <label className="text-xs font-medium"># Investments</label>
+                <span className="text-sm font-bold">{nInvestments}</span>
+              </div>
               <Slider min={50} max={300} step={1} value={[nInvestments]} onValueChange={v => setNInvestments(Number(v[0]))} className="mb-2" />
-              <div className="flex items-center justify-between">
+              <div className="flex items-center justify-between mb-1">
                 <label className="text-xs font-medium"># Simulations</label>
                 <span className="text-sm font-bold">{nSimulations}</span>
               </div>
@@ -451,7 +457,7 @@ export function MoonfireSimulator({ layout }: { layout?: 'split' }) {
                   {simError}
                 </div>
               )}
-              <Input type="number" step="1" value={nSimulations} onChange={e => handleSimulationsChange(Number(e.target.value))} />
+              <Slider min={10000} max={100000} step={1000} value={[nSimulations]} onValueChange={v => handleSimulationsChange(Number(v[0]))} className="mb-2" />
             </div>
             <Button onClick={handleRunSimulation} disabled={loading} className="mt-6 w-full">
               {loading ? 'Simulating...' : 'Run Simulation'}
@@ -825,47 +831,56 @@ export function MoonfireSimulator({ layout }: { layout?: 'split' }) {
         </p>
         <div className="grid grid-cols-2 gap-4 mb-4">
           <div>
-            <div className="flex items-center gap-1">
-              <label className="text-xs font-medium">Pareto α</label>
-              <Popover>
-                <PopoverTrigger asChild>
-                  <span
-                    tabIndex={0}
-                    className="ml-1 inline-flex items-center justify-center w-5 h-5 rounded-full bg-blue-100 text-blue-600 text-xs font-bold cursor-pointer border border-blue-200 select-none"
-                    onMouseEnter={e => e.currentTarget.click()}
-                    onFocus={e => e.currentTarget.click()}
-                    onMouseLeave={e => document.activeElement === e.currentTarget && e.currentTarget.blur()}
-                    aria-label="Alpha info"
-                  >i</span>
-                </PopoverTrigger>
-                <PopoverContent className="max-w-xs text-sm p-4" side="right" align="start">
-                  <div className="font-semibold mb-2">What Alpha Controls</div>
-                  <div className="mb-2">Alpha (α) determines the "heaviness" of the tail in the power-law distribution of investment returns.</div>
-                  <div className="font-semibold mb-2">What Different Alpha Values Mean:</div>
-                  <ul className="list-disc pl-4 mb-2">
-                    <li><b>α = 2.5:</b> Lighter tail; extreme returns (e.g., 10x–20x) are less probable, and returns are more evenly distributed across investments.</li>
-                    <li><b>α = 2.0:</b> Heavier tail; a small percentage of investments may yield very high returns (e.g., 100x), significantly impacting overall fund performance.</li>
-                    <li><b>α = 1.5:</b> Very heavy tail; fund performance is dominated by a few exceptionally high-return investments, making it crucial for VCs to identify and invest in potential "unicorns."</li>
-                  </ul>
-                </PopoverContent>
-              </Popover>
+            <div className="flex items-center justify-between mb-1">
+              <div className="flex items-center gap-1">
+                <label className="text-xs font-medium">Pareto α</label>
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <span
+                      tabIndex={0}
+                      className="ml-1 inline-flex items-center justify-center w-5 h-5 rounded-full bg-blue-100 text-blue-600 text-xs font-bold cursor-pointer border border-blue-200 select-none"
+                      onMouseEnter={e => e.currentTarget.click()}
+                      onFocus={e => e.currentTarget.click()}
+                      onMouseLeave={e => document.activeElement === e.currentTarget && e.currentTarget.blur()}
+                      aria-label="Alpha info"
+                    >i</span>
+                  </PopoverTrigger>
+                  <PopoverContent className="max-w-xs text-sm p-4" side="right" align="start">
+                    <div className="font-semibold mb-2">What Alpha Controls</div>
+                    <div className="mb-2">Alpha (α) determines the "heaviness" of the tail in the power-law distribution of investment returns.</div>
+                    <div className="font-semibold mb-2">What Different Alpha Values Mean:</div>
+                    <ul className="list-disc pl-4 mb-2">
+                      <li><b>α = 2.5:</b> Lighter tail; extreme returns (e.g., 10x–20x) are less probable, and returns are more evenly distributed across investments.</li>
+                      <li><b>α = 2.0:</b> Heavier tail; a small percentage of investments may yield very high returns (e.g., 100x), significantly impacting overall fund performance.</li>
+                      <li><b>α = 1.5:</b> Very heavy tail; fund performance is dominated by a few exceptionally high-return investments, making it crucial for VCs to identify and invest in potential "unicorns."</li>
+                    </ul>
+                  </PopoverContent>
+                </Popover>
+              </div>
+              <span className="text-sm font-bold">{alpha.toFixed(2)}</span>
             </div>
-            <Input type="number" step="0.01" value={alpha} onChange={e => setAlpha(Number(e.target.value))} />
+            <Slider min={1} max={3} step={0.1} value={[alpha]} onValueChange={v => setAlpha(Number(v[0]))} className="mb-2" />
           </div>
           <div>
-            <label className="text-xs font-medium">Worst Case Return (%)</label>
-            <Input type="number" step="0.01" min={0} max={100} value={xMin * 100} onChange={e => setXMin(Number(e.target.value) / 100)} />
+            <div className="flex items-center justify-between mb-1">
+              <label className="text-xs font-medium">Worst Case Return (%)</label>
+              <span className="text-sm font-bold">{(xMin * 100).toFixed(0)}%</span>
+            </div>
+            <Slider min={10} max={50} step={1} value={[xMin * 100]} onValueChange={v => setXMin(Number(v[0]) / 100)} className="mb-2" />
           </div>
           <div>
             <label className="text-xs font-medium">Best Case Return (%)</label>
             <Input type="number" step="0.01" min={0} max={100} value={xMax * 100} onChange={e => setXMax(Number(e.target.value) / 100)} />
           </div>
           <div>
-            <label className="text-xs font-medium"># Investments</label>
-            <Input type="number" step="1" value={nInvestments} onChange={e => setNInvestments(Number(e.target.value))} />
+            <div className="flex items-center justify-between mb-1">
+              <label className="text-xs font-medium"># Investments</label>
+              <span className="text-sm font-bold">{nInvestments}</span>
+            </div>
+            <Slider min={50} max={300} step={1} value={[nInvestments]} onValueChange={v => setNInvestments(Number(v[0]))} className="mb-2" />
           </div>
           <div>
-            <div className="flex items-center justify-between">
+            <div className="flex items-center justify-between mb-1">
               <label className="text-xs font-medium"># Simulations</label>
               <span className="text-sm font-bold">{nSimulations}</span>
             </div>
@@ -875,7 +890,7 @@ export function MoonfireSimulator({ layout }: { layout?: 'split' }) {
                 {simError}
               </div>
             )}
-            <Input type="number" step="1" value={nSimulations} onChange={e => handleSimulationsChange(Number(e.target.value))} />
+            <Slider min={10000} max={100000} step={1000} value={[nSimulations]} onValueChange={v => handleSimulationsChange(Number(v[0]))} className="mb-2" />
           </div>
         </div>
         <Button onClick={handleRunSimulation} disabled={loading}>

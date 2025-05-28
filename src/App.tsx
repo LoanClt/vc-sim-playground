@@ -5,7 +5,7 @@ import { Bar, BarChart, XAxis, YAxis, CartesianGrid, Tooltip, Legend, Responsive
 import { PieChart, Pie } from 'recharts';
 import { Card } from './components/ui/card';
 import { Button } from './components/ui/button';
-import { FileDown, FileUp, Eye, EyeOff, ExternalLink, Rocket, ArrowLeft, ArrowRight } from 'lucide-react';
+import { FileDown, FileUp, Eye, EyeOff, ExternalLink, Rocket, ArrowLeft, ArrowRight, Star } from 'lucide-react';
 import { toast, Toaster } from 'sonner';
 import { cn } from './lib/utils';
 import { useVCFundStore } from './lib/store';
@@ -1800,12 +1800,15 @@ function App() {
                                 return invs.slice(0, numToShow).map((inv: Investment, idx: number) => {
                                   const entryStage = inv.entryStage || "";
                                   const exitStage = inv.exitStage || "";
-                                  let companyLabel = idx + 1;
+                                  let companyLabel: string = String(idx + 1);
+                                  let showFollowOnStar = false;
                                   if (isPortfolioMode) {
                                     // inv.id is in the format 'sim-companyId'
                                     const idParts = String(inv.id).split('-');
                                     const companyId = idParts.length > 1 ? idParts.slice(1).join('-') : idParts[0];
                                     companyLabel = companyNameMap[companyId] || companyLabel;
+                                    // Use followOn and followOnAB from closure (App state)
+                                    showFollowOnStar = !!((followOn.selected && followOn.selected[companyId]) || (followOnAB.selected && followOnAB.selected[companyId]));
                                   }
                                   return (
                                     <tr key={idx} className="border-b border-gray-200">
@@ -1813,6 +1816,9 @@ function App() {
                                         {/* Rocket icon if multiple > 2 */}
                                         {inv.entryAmount > 0 && (inv.exitAmount / inv.entryAmount) > 2 && (
                                           <Rocket className="w-4 h-4 text-orange-500" />
+                                        )}
+                                        {isPortfolioMode && showFollowOnStar && (
+                                          <Star className="w-4 h-4 text-yellow-400" />
                                         )}
                                         {companyLabel}
                                       </td>
