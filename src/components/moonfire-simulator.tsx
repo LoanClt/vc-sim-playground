@@ -1,10 +1,12 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback, Fragment } from 'react';
 import { Card } from './ui/card';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
-import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Line, ReferenceLine, Legend, ComposedChart, Area } from 'recharts';
-import { Share2, AlertTriangle } from 'lucide-react';
+import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Line, ReferenceLine, Legend, ComposedChart, Area, LineChart } from 'recharts';
+import { Share2, AlertTriangle, BarChart2, TrendingUp, Sigma, Hash, ArrowDownCircle, PercentCircle, Copy } from 'lucide-react';
 import { toast } from 'sonner';
+import chroma from 'chroma-js';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from './ui/dialog';
 
 // Bounded Pareto distribution (power law) as in the Python code
 function boundedParetoRVS(alpha: number, xMin: number, xMax: number, size: number): number[] {
@@ -142,15 +144,34 @@ function SimpleHeatmap({ data }: { data: number[][] }) {
 function runPortfolioSizeAnalysis(alpha: number, xMin: number, xMax: number, nSimulations: number, sizes: number[]) {
   const results = sizes.map(size => {
     const sim = runMoonfireSimulation({ alpha, xMin, xMax, nInvestments: size, nSimulations });
+    // Compute Sharpe-like ratio (mean - 1) / std, as in the Python code
+    const sharpe = sim.std > 0 ? (sim.mean - 1) / sim.std : 0;
     return {
       size,
       mean: sim.mean,
       std: sim.std,
       probLoss: sim.probLoss,
+      prob2x: sim.prob2x,
+      prob10x: sim.prob10x,
       returns: sim.portfolioReturns,
+      sharpe,
     };
   });
   return results;
+}
+
+// Add this before the first use of violinSizes (before line 206)
+const violinSizes = [10, 25, 50, 100, 200, 500];
+
+// Add a function to generate heatmap data for investment returns
+function generateHeatmapData(alpha: number, xMin: number, xMax: number, nInvestments: number, nSimulations: number) {
+  const data: number[][] = [];
+  for (let i = 0; i < nSimulations; i++) {
+    const rawReturns = boundedParetoRVS(alpha, xMin, xMax + xMin, nInvestments);
+    const adjustedReturns = rawReturns.map(r => (r - xMin) * (1.0 / nInvestments));
+    data.push(adjustedReturns);
+  }
+  return data;
 }
 
 export function MoonfireSimulator({ layout }: { layout?: 'split' }) {
@@ -166,9 +187,35 @@ export function MoonfireSimulator({ layout }: { layout?: 'split' }) {
   const [sizeLoading, setSizeLoading] = useState(false);
   const MAX_SIMULATIONS = 1000000;
   const [simError, setSimError] = useState<string | null>(null);
+  const [heatmapData, setHeatmapData] = useState<number[][] | null>(null);
+  const [heatmapStats, setHeatmapStats] = useState<any>(null);
+  const nSimulationsHeatmap = 50;
+  const quantileOptions = [
+    { label: '1% Quantile', value: 'quantile01' },
+    { label: '5% Quantile', value: 'quantile05' },
+    { label: '10% Quantile', value: 'quantile10' },
+    { label: '25% Quantile', value: 'quantile25' },
+    { label: '50% Quantile (Median)', value: 'median' },
+    { label: '75% Quantile', value: 'quantile75' },
+    { label: '90% Quantile', value: 'quantile90' },
+    { label: '95% Quantile', value: 'quantile95' },
+    { label: '99% Quantile', value: 'quantile99' },
+  ];
+  const [selectedQuantile, setSelectedQuantile] = useState('quantile01');
+  const probabilityOptions = [
+    { label: 'Prob. Loss', value: 'probLoss', display: 'Probability of Loss (Return < 1x)' },
+    { label: 'Prob. 2x+', value: 'prob2x', display: 'Probability of 2x+' },
+    { label: 'Prob. 5x+', value: 'prob5x', display: 'Probability of 5x+' },
+    { label: 'Prob. 10x+', value: 'prob10x', display: 'Probability of 10x+' },
+  ];
+  const [selectedProbability, setSelectedProbability] = useState('probLoss');
+  const [shareDialogOpen, setShareDialogOpen] = useState(false);
+  const [shareUrl, setShareUrl] = useState('');
 
-  const handleRun = () => {
+  // Only run simulation when user clicks the button
+  const handleRunSimulation = () => {
     setLoading(true);
+    setSizeLoading(true);
     setTimeout(() => {
       const simResults = runMoonfireSimulation({
         alpha: Number(alpha),
@@ -178,19 +225,20 @@ export function MoonfireSimulator({ layout }: { layout?: 'split' }) {
         nSimulations: Number(nSimulations),
       });
       setResults(simResults);
-      setLoading(false);
-    }, 100);
-  };
-
-  // Portfolio size analysis (mean/std vs size)
-  const portfolioSizes = [10, 25, 50, 100, 200, 500];
-  const violinSizes = [25, 50, 100, 200];
-
-  const handleSizeAnalysis = () => {
-    setSizeLoading(true);
-    setTimeout(() => {
-      const res = runPortfolioSizeAnalysis(alpha, xMin, xMax, 2000, portfolioSizes);
+      const res = runPortfolioSizeAnalysis(alpha, xMin, xMax, 2000, [10, 25, 50, 100, 200, 500]);
       setSizeAnalysis(res);
+      // Generate heatmap data
+      const hData = generateHeatmapData(Number(alpha), Number(xMin), Number(xMax), Number(nInvestments), nSimulationsHeatmap);
+      setHeatmapData(hData);
+      // Compute stats
+      const flat = hData.flat();
+      setHeatmapStats({
+        mean: flat.length ? flat.reduce((a, b) => a + b, 0) / flat.length : 0,
+        min: flat.length ? Math.min(...flat) : 0,
+        max: flat.length ? Math.max(...flat) : 0,
+        std: flat.length ? Math.sqrt(flat.reduce((a, b) => a + (b - (flat.reduce((a, b) => a + b, 0) / flat.length)) ** 2, 0) / flat.length) : 0,
+      });
+      setLoading(false);
       setSizeLoading(false);
     }, 100);
   };
@@ -270,6 +318,14 @@ export function MoonfireSimulator({ layout }: { layout?: 'split' }) {
     { q: '99%', value: results.quantile99 },
   ] : [];
 
+  // Probability data
+  const probData = sizeAnalysis ? sizeAnalysis.map(r => ({
+    size: r.size,
+    probLoss: r.probLoss,
+    prob2x: r.prob2x,
+    prob10x: r.prob10x
+  })) : [];
+
   // In the Parameters Panel, clamp and alert on nSimulations input
   const handleSimulationsChange = (value: number) => {
     if (value > MAX_SIMULATIONS) {
@@ -299,6 +355,20 @@ export function MoonfireSimulator({ layout }: { layout?: 'split' }) {
     });
   }
 
+  // Implement share parameters logic
+  const handleShareParameters = useCallback(() => {
+    const params = new URLSearchParams({
+      alpha: String(alpha),
+      xMin: String(xMin),
+      xMax: String(xMax),
+      nInvestments: String(nInvestments),
+      nSimulations: String(nSimulations),
+    });
+    const url = `${window.location.origin}${window.location.pathname}?${params.toString()}`;
+    setShareUrl(url);
+    setShareDialogOpen(true);
+  }, [alpha, xMin, xMax, nInvestments, nSimulations]);
+
   if (layout === 'split') {
     return (
       <>
@@ -308,7 +378,7 @@ export function MoonfireSimulator({ layout }: { layout?: 'split' }) {
           <Card className="p-6 md:col-span-1">
             <div className="flex items-center justify-between mb-4">
               <h2 className="text-xl font-semibold">Parameters</h2>
-              <Button size="sm" variant="outline" className="flex items-center gap-1" onClick={() => { /* TODO: implement share logic */ }}>
+              <Button size="sm" variant="outline" className="flex items-center gap-1" onClick={handleShareParameters}>
                 <Share2 className="w-4 h-4 mr-1" />
                 Share Parameters
               </Button>
@@ -331,7 +401,7 @@ export function MoonfireSimulator({ layout }: { layout?: 'split' }) {
               )}
               <Input type="number" step="1" value={nSimulations} onChange={e => handleSimulationsChange(Number(e.target.value))} />
             </div>
-            <Button onClick={handleRun} disabled={loading} className="mt-6 w-full">
+            <Button onClick={handleRunSimulation} disabled={loading} className="mt-6 w-full">
               {loading ? 'Simulating...' : 'Run Simulation'}
             </Button>
             <div className="text-xs text-gray-500 mt-3">
@@ -343,7 +413,7 @@ export function MoonfireSimulator({ layout }: { layout?: 'split' }) {
             <Card className="p-6">
               <div className="flex justify-between items-center mb-4">
                 <h2 className="text-xl font-semibold">Simulation Results</h2>
-                <Button onClick={handleRun} disabled={loading} size="sm">
+                <Button onClick={handleRunSimulation} disabled={loading} size="sm">
                   {loading ? 'Simulating...' : 'Run Simulation'}
                 </Button>
               </div>
@@ -353,11 +423,12 @@ export function MoonfireSimulator({ layout }: { layout?: 'split' }) {
                     <button className={`px-3 py-1 rounded ${tab === 'hist' ? 'bg-blue-600 text-white' : 'bg-gray-100'}`} onClick={() => setTab('hist')}>Histogram</button>
                     <button className={`px-3 py-1 rounded ${tab === 'loghist' ? 'bg-blue-600 text-white' : 'bg-gray-100'}`} onClick={() => setTab('loghist')}>Log-Scale Histogram</button>
                     <button className={`px-3 py-1 rounded ${tab === 'cdf' ? 'bg-blue-600 text-white' : 'bg-gray-100'}`} onClick={() => setTab('cdf')}>CDF</button>
-                    <button className={`px-3 py-1 rounded ${tab === 'risk' ? 'bg-blue-600 text-white' : 'bg-gray-100'}`} onClick={() => setTab('risk')}>Risk Metrics</button>
+                    <button className={`px-3 py-1 rounded ${tab === 'sharpe' ? 'bg-blue-600 text-white' : 'bg-gray-100'}`} onClick={() => { setTab('sharpe'); if (!sizeAnalysis && !sizeLoading) handleSizeAnalysis(); }}>Risk-Adjusted Performance</button>
                     <button className={`px-3 py-1 rounded ${tab === 'quant' ? 'bg-blue-600 text-white' : 'bg-gray-100'}`} onClick={() => setTab('quant')}>Quantiles</button>
                     <button className={`px-3 py-1 rounded ${tab === 'heat' ? 'bg-blue-600 text-white' : 'bg-gray-100'}`} onClick={() => setTab('heat')}>Investment Heatmap</button>
                     <button className={`px-3 py-1 rounded ${tab === 'size' ? 'bg-blue-600 text-white' : 'bg-gray-100'}`} onClick={() => { setTab('size'); if (!sizeAnalysis && !sizeLoading) handleSizeAnalysis(); }}>Portfolio Size Analysis</button>
                     <button className={`px-3 py-1 rounded ${tab === 'violin' ? 'bg-blue-600 text-white' : 'bg-gray-100'}`} onClick={() => { setTab('violin'); if (!sizeAnalysis && !sizeLoading) handleSizeAnalysis(); }}>Return Distribution by Size</button>
+                    <button className={`px-3 py-1 rounded ${tab === 'prob' ? 'bg-blue-600 text-white' : 'bg-gray-100'}`} onClick={() => { setTab('prob'); if (!sizeAnalysis && !sizeLoading) handleSizeAnalysis(); }}>Return Probabilities</button>
                   </div>
                   {tab === 'hist' && (
                     <>
@@ -411,22 +482,36 @@ export function MoonfireSimulator({ layout }: { layout?: 'split' }) {
                       </div>
                     </>
                   )}
-                  {tab === 'risk' && (
+                  {tab === 'sharpe' && (
                     <>
-                      <h3 className="text-lg font-semibold mb-2">Risk Metrics</h3>
-                      <div className="mb-4" style={{ width: '100%', height: 240 }}>
-                        <ResponsiveContainer width="100%" height={240}>
-                          <BarChart data={riskData}>
-                            <CartesianGrid strokeDasharray="3 3" />
-                            <XAxis dataKey="metric" />
-                            <YAxis />
-                            <Tooltip />
-                            <Bar dataKey="value" fill="#f87171">
-                              {/* Add value labels */}
-                            </Bar>
-                          </BarChart>
-                        </ResponsiveContainer>
-                      </div>
+                      <h3 className="text-lg font-semibold mb-2">Risk-Adjusted Performance (Sharpe Ratio)</h3>
+                      {sizeLoading ? (
+                        <div className="py-8 text-center text-gray-500">Simulating...</div>
+                      ) : sizeAnalysis ? (
+                        (() => {
+                          // Filter out invalid or non-finite sharpe values
+                          const validSharpeData = sizeAnalysis.filter(r => Number.isFinite(r.sharpe));
+                          if (!validSharpeData.length) {
+                            return <div className="py-8 text-center text-gray-500">No valid data to plot Sharpe Ratio.</div>;
+                          }
+                          return (
+                            <div className="mb-4" style={{ width: '100%', height: 260 }}>
+                              <ResponsiveContainer width="100%" height={260}>
+                                <LineChart data={validSharpeData}>
+                                  <CartesianGrid strokeDasharray="3 3" />
+                                  <XAxis dataKey="size" />
+                                  <YAxis label={{ value: 'Sharpe Ratio', angle: -90, position: 'insideLeft' }} />
+                                  <Tooltip />
+                                  <Legend />
+                                  <Line type="monotone" dataKey="sharpe" stroke="#10b981" name="Sharpe Ratio" />
+                                </LineChart>
+                              </ResponsiveContainer>
+                            </div>
+                          );
+                        })()
+                      ) : (
+                        <div className="py-8 text-center text-gray-500">Click the tab to run analysis.</div>
+                      )}
                     </>
                   )}
                   {tab === 'quant' && (
@@ -448,8 +533,34 @@ export function MoonfireSimulator({ layout }: { layout?: 'split' }) {
                   {tab === 'heat' && (
                     <>
                       <h3 className="text-lg font-semibold mb-2">Investment Returns Heatmap (First 50 Simulations)</h3>
-                      <div className="mb-4">
-                        <CanvasHeatmap data={results.allInvestmentReturns.slice(0, 50)} />
+                      <div className="mb-4 flex flex-col items-center">
+                        {heatmapData && heatmapData.length > 0 ? (
+                          <svg width={Math.max(600, 8 * nInvestments)} height={16 * nSimulationsHeatmap + 40} style={{ background: '#fff', borderRadius: 8, border: '1px solid #eee' }}>
+                            {/* Color grid */}
+                            {heatmapData.map((row, i) =>
+                              row.map((val, j) => {
+                                // Viridis colormap using chroma-js
+                                const color = chroma.scale('viridis').domain([heatmapStats.min, heatmapStats.max])(val).hex();
+                                return <rect key={i + '-' + j} x={j * 8} y={i * 16} width={8} height={16} fill={color} />;
+                              })
+                            )}
+                            {/* Axes labels */}
+                            <text x={8} y={16 * nSimulationsHeatmap + 20} fontSize={12} fill="#444">Investment Index →</text>
+                            <text x={-60} y={16 * nSimulationsHeatmap / 2} fontSize={12} fill="#444" transform={`rotate(-90 0,${16 * nSimulationsHeatmap / 2})`}>Simulation Number ↓</text>
+                          </svg>
+                        ) : (
+                          <div className="py-8 text-center text-gray-500">No data to display heatmap.</div>
+                        )}
+                        {/* Stats box */}
+                        {heatmapStats && (
+                          <div className="mt-4 p-2 bg-white border rounded shadow text-xs font-mono text-left" style={{ minWidth: 220 }}>
+                            <div><b>Statistics:</b></div>
+                            <div>Mean: {heatmapStats.mean.toFixed(4)}x</div>
+                            <div>Max: {heatmapStats.max.toFixed(2)}x</div>
+                            <div>Min: {heatmapStats.min.toFixed(4)}x</div>
+                            <div>Std: {heatmapStats.std.toFixed(4)}</div>
+                          </div>
+                        )}
                       </div>
                     </>
                   )}
@@ -552,79 +663,70 @@ export function MoonfireSimulator({ layout }: { layout?: 'split' }) {
                       )}
                     </>
                   )}
+                  {tab === 'prob' && (
+                    <>
+                      <h3 className="text-lg font-semibold mb-2">Return Probabilities</h3>
+                      {sizeLoading ? (
+                        <div className="py-8 text-center text-gray-500">Simulating...</div>
+                      ) : sizeAnalysis ? (
+                        <div className="mb-4" style={{ width: '100%', height: 260 }}>
+                          <ResponsiveContainer width="100%" height={260}>
+                            <LineChart data={probData}>
+                              <CartesianGrid strokeDasharray="3 3" />
+                              <XAxis dataKey="size" />
+                              <YAxis label={{ value: 'Probability', angle: -90, position: 'insideLeft' }} domain={[0, 1]} />
+                              <Tooltip formatter={v => (v * 100).toFixed(1) + '%'} />
+                              <Legend />
+                              <Line type="monotone" dataKey="probLoss" stroke="#ef4444" name="Prob(Loss)" />
+                              <Line type="monotone" dataKey="prob2x" stroke="#10b981" name="Prob(2x+)" />
+                              <Line type="monotone" dataKey="prob10x" stroke="#a21caf" name="Prob(10x+)" />
+                            </LineChart>
+                          </ResponsiveContainer>
+                        </div>
+                      ) : (
+                        <div className="py-8 text-center text-gray-500">Click the tab to run analysis.</div>
+                      )}
+                    </>
+                  )}
                   {/* Summary stats table (always visible) */}
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-6">
-                    <div>
-                      <div className="text-sm text-gray-500">Mean</div>
-                      <div className="text-xl font-semibold">{results.mean.toFixed(3)}</div>
+                  <div className="mt-6 bg-gray-50 rounded-lg shadow-sm p-4 flex flex-col gap-2">
+                    {/* 1st line: Mean, Std Deviation, Median */}
+                    <div className="flex flex-wrap gap-6 items-center">
+                      <TrendingUp className="w-5 h-5 text-blue-500 mr-2" />
+                      <span className="text-sm text-gray-500">Mean</span><span className="text-xl font-semibold">{results.mean.toFixed(3)}</span>
+                      <span className="text-sm text-gray-500 ml-6">Std Dev</span><span className="text-xl font-semibold">{results.std.toFixed(3)}</span>
+                      <span className="text-sm text-gray-500 ml-6">Median</span><span className="text-xl font-semibold">{results.median.toFixed(3)}</span>
                     </div>
-                    <div>
-                      <div className="text-sm text-gray-500">Std Deviation</div>
-                      <div className="text-xl font-semibold">{results.std.toFixed(3)}</div>
+                    {/* 2nd line: Probability dropdown */}
+                    <div className="flex flex-wrap gap-6 items-center">
+                      <PercentCircle className="w-5 h-5 text-red-500 mr-2" />
+                      <span className="text-sm text-gray-500">Probability</span>
+                      <select
+                        className="text-sm rounded border-gray-300 focus:ring-blue-500 focus:border-blue-500"
+                        value={selectedProbability}
+                        onChange={e => setSelectedProbability(e.target.value)}
+                      >
+                        {probabilityOptions.map(opt => (
+                          <option key={opt.value} value={opt.value}>{opt.label}</option>
+                        ))}
+                      </select>
+                      <span className="text-xl font-semibold">
+                        {((results[selectedProbability] ?? 0) * 100).toFixed(2)}%
+                      </span>
                     </div>
-                    <div>
-                      <div className="text-sm text-gray-500">Median</div>
-                      <div className="text-xl font-semibold">{results.median.toFixed(3)}</div>
+                    {/* 3rd line: Max Return, Min Return */}
+                    <div className="flex flex-wrap gap-6 items-center">
+                      <ArrowDownCircle className="w-5 h-5 text-yellow-500 mr-2" />
+                      <span className="text-sm text-gray-500">Max Return</span><span className="text-xl font-semibold">{results.maxReturn.toFixed(3)}</span>
+                      <span className="text-sm text-gray-500 ml-6">Min Return</span><span className="text-xl font-semibold">{results.minReturn.toFixed(3)}</span>
                     </div>
-                    <div>
-                      <div className="text-sm text-gray-500">Probability of Loss (Return &lt; 1x)</div>
-                      <div className="text-xl font-semibold">{(results.probLoss * 100).toFixed(2)}%</div>
-                    </div>
-                    <div>
-                      <div className="text-sm text-gray-500">Probability of 2x+</div>
-                      <div className="text-xl font-semibold">{(results.prob2x * 100).toFixed(2)}%</div>
-                    </div>
-                    <div>
-                      <div className="text-sm text-gray-500">Probability of 5x+</div>
-                      <div className="text-xl font-semibold">{(results.prob5x * 100).toFixed(2)}%</div>
-                    </div>
-                    <div>
-                      <div className="text-sm text-gray-500">Probability of 10x+</div>
-                      <div className="text-xl font-semibold">{(results.prob10x * 100).toFixed(2)}%</div>
-                    </div>
-                    <div>
-                      <div className="text-sm text-gray-500">1% Quantile</div>
-                      <div className="text-xl font-semibold">{results.quantile01.toFixed(3)}</div>
-                    </div>
-                    <div>
-                      <div className="text-sm text-gray-500">5% Quantile</div>
-                      <div className="text-xl font-semibold">{results.quantile05.toFixed(3)}</div>
-                    </div>
-                    <div>
-                      <div className="text-sm text-gray-500">10% Quantile</div>
-                      <div className="text-xl font-semibold">{results.quantile10.toFixed(3)}</div>
-                    </div>
-                    <div>
-                      <div className="text-sm text-gray-500">25% Quantile</div>
-                      <div className="text-xl font-semibold">{results.quantile25.toFixed(3)}</div>
-                    </div>
-                    <div>
-                      <div className="text-sm text-gray-500">75% Quantile</div>
-                      <div className="text-xl font-semibold">{results.quantile75.toFixed(3)}</div>
-                    </div>
-                    <div>
-                      <div className="text-sm text-gray-500">90% Quantile</div>
-                      <div className="text-xl font-semibold">{results.quantile90.toFixed(3)}</div>
-                    </div>
-                    <div>
-                      <div className="text-sm text-gray-500">95% Quantile</div>
-                      <div className="text-xl font-semibold">{results.quantile95.toFixed(3)}</div>
-                    </div>
-                    <div>
-                      <div className="text-sm text-gray-500">99% Quantile</div>
-                      <div className="text-xl font-semibold">{results.quantile99.toFixed(3)}</div>
-                    </div>
-                    <div>
-                      <div className="text-sm text-gray-500">Min Return</div>
-                      <div className="text-xl font-semibold">{results.minReturn.toFixed(3)}</div>
-                    </div>
-                    <div>
-                      <div className="text-sm text-gray-500">Max Return</div>
-                      <div className="text-xl font-semibold">{results.maxReturn.toFixed(3)}</div>
-                    </div>
-                    <div>
-                      <div className="text-sm text-gray-500">Execution Time</div>
-                      <div className="text-xl font-semibold">{results.executionTime.toFixed(2)}s</div>
+                    {/* 4th line: Quantile, Execution Time */}
+                    <div className="flex flex-wrap gap-6 items-center">
+                      <BarChart2 className="w-5 h-5 text-gray-400 mr-2" />
+                      <span className="text-sm text-gray-500">Quantile</span>
+                      <select className="text-sm rounded border-gray-300 focus:ring-blue-500 focus:border-blue-500" value={selectedQuantile} onChange={e => setSelectedQuantile(e.target.value)}>{quantileOptions.map(opt => (<option key={opt.value} value={opt.value}>{opt.label}</option>))}</select>
+                      <span className="text-xl font-semibold">{results[selectedQuantile]?.toFixed(3)}</span>
+                      <span className="text-sm text-gray-500 ml-6">Execution Time</span><span className="text-xl font-semibold">{results.executionTime.toFixed(2)}s</span>
                     </div>
                   </div>
                 </>
@@ -632,6 +734,33 @@ export function MoonfireSimulator({ layout }: { layout?: 'split' }) {
             </Card>
           </div>
         </div>
+        <Dialog open={shareDialogOpen} onOpenChange={setShareDialogOpen}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Share Simulation Parameters</DialogTitle>
+              <DialogDescription>
+                Share this URL to allow others to run the same simulation with your exact parameters.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="flex items-center gap-2 mb-2 mt-2">
+              <Input
+                type="text"
+                className="flex-1 text-sm font-normal"
+                value={shareUrl}
+                readOnly
+                onFocus={e => e.target.select()}
+              />
+              <Button size="icon" variant="outline" onClick={() => { navigator.clipboard.writeText(shareUrl); toast.success('URL copied to clipboard!'); }}>
+                <Copy className="w-4 h-4" />
+              </Button>
+            </div>
+            <DialogFooter>
+              <div className="text-xs text-gray-500 mt-2">
+                Anyone with this link can view and run your simulation with the exact same parameters.
+              </div>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </>
     );
   }
@@ -670,7 +799,7 @@ export function MoonfireSimulator({ layout }: { layout?: 'split' }) {
             <Input type="number" step="1" value={nSimulations} onChange={e => handleSimulationsChange(Number(e.target.value))} />
           </div>
         </div>
-        <Button onClick={handleRun} disabled={loading}>
+        <Button onClick={handleRunSimulation} disabled={loading}>
           {loading ? 'Simulating...' : 'Run Moonfire Simulation'}
         </Button>
       </Card>
@@ -680,11 +809,12 @@ export function MoonfireSimulator({ layout }: { layout?: 'split' }) {
             <button className={`px-3 py-1 rounded ${tab === 'hist' ? 'bg-blue-600 text-white' : 'bg-gray-100'}`} onClick={() => setTab('hist')}>Histogram</button>
             <button className={`px-3 py-1 rounded ${tab === 'loghist' ? 'bg-blue-600 text-white' : 'bg-gray-100'}`} onClick={() => setTab('loghist')}>Log-Scale Histogram</button>
             <button className={`px-3 py-1 rounded ${tab === 'cdf' ? 'bg-blue-600 text-white' : 'bg-gray-100'}`} onClick={() => setTab('cdf')}>CDF</button>
-            <button className={`px-3 py-1 rounded ${tab === 'risk' ? 'bg-blue-600 text-white' : 'bg-gray-100'}`} onClick={() => setTab('risk')}>Risk Metrics</button>
+            <button className={`px-3 py-1 rounded ${tab === 'sharpe' ? 'bg-blue-600 text-white' : 'bg-gray-100'}`} onClick={() => { setTab('sharpe'); if (!sizeAnalysis && !sizeLoading) handleSizeAnalysis(); }}>Risk-Adjusted Performance</button>
             <button className={`px-3 py-1 rounded ${tab === 'quant' ? 'bg-blue-600 text-white' : 'bg-gray-100'}`} onClick={() => setTab('quant')}>Quantiles</button>
             <button className={`px-3 py-1 rounded ${tab === 'heat' ? 'bg-blue-600 text-white' : 'bg-gray-100'}`} onClick={() => setTab('heat')}>Investment Heatmap</button>
             <button className={`px-3 py-1 rounded ${tab === 'size' ? 'bg-blue-600 text-white' : 'bg-gray-100'}`} onClick={() => { setTab('size'); if (!sizeAnalysis && !sizeLoading) handleSizeAnalysis(); }}>Portfolio Size Analysis</button>
             <button className={`px-3 py-1 rounded ${tab === 'violin' ? 'bg-blue-600 text-white' : 'bg-gray-100'}`} onClick={() => { setTab('violin'); if (!sizeAnalysis && !sizeLoading) handleSizeAnalysis(); }}>Return Distribution by Size</button>
+            <button className={`px-3 py-1 rounded ${tab === 'prob' ? 'bg-blue-600 text-white' : 'bg-gray-100'}`} onClick={() => { setTab('prob'); if (!sizeAnalysis && !sizeLoading) handleSizeAnalysis(); }}>Return Probabilities</button>
           </div>
           {tab === 'hist' && (
             <>
@@ -738,22 +868,36 @@ export function MoonfireSimulator({ layout }: { layout?: 'split' }) {
               </div>
             </>
           )}
-          {tab === 'risk' && (
+          {tab === 'sharpe' && (
             <>
-              <h3 className="text-lg font-semibold mb-2">Risk Metrics</h3>
-              <div className="mb-4" style={{ width: '100%', height: 240 }}>
-                <ResponsiveContainer width="100%" height={240}>
-                  <BarChart data={riskData}>
-                    <CartesianGrid strokeDasharray="3 3" />
-                    <XAxis dataKey="metric" />
-                    <YAxis />
-                    <Tooltip />
-                    <Bar dataKey="value" fill="#f87171">
-                      {/* Add value labels */}
-                    </Bar>
-                  </BarChart>
-                </ResponsiveContainer>
-              </div>
+              <h3 className="text-lg font-semibold mb-2">Risk-Adjusted Performance (Sharpe Ratio)</h3>
+              {sizeLoading ? (
+                <div className="py-8 text-center text-gray-500">Simulating...</div>
+              ) : sizeAnalysis ? (
+                (() => {
+                  // Filter out invalid or non-finite sharpe values
+                  const validSharpeData = sizeAnalysis.filter(r => Number.isFinite(r.sharpe));
+                  if (!validSharpeData.length) {
+                    return <div className="py-8 text-center text-gray-500">No valid data to plot Sharpe Ratio.</div>;
+                  }
+                  return (
+                    <div className="mb-4" style={{ width: '100%', height: 260 }}>
+                      <ResponsiveContainer width="100%" height={260}>
+                        <LineChart data={validSharpeData}>
+                          <CartesianGrid strokeDasharray="3 3" />
+                          <XAxis dataKey="size" />
+                          <YAxis label={{ value: 'Sharpe Ratio', angle: -90, position: 'insideLeft' }} />
+                          <Tooltip />
+                          <Legend />
+                          <Line type="monotone" dataKey="sharpe" stroke="#10b981" name="Sharpe Ratio" />
+                        </LineChart>
+                      </ResponsiveContainer>
+                    </div>
+                  );
+                })()
+              ) : (
+                <div className="py-8 text-center text-gray-500">Click the tab to run analysis.</div>
+              )}
             </>
           )}
           {tab === 'quant' && (
@@ -775,8 +919,34 @@ export function MoonfireSimulator({ layout }: { layout?: 'split' }) {
           {tab === 'heat' && (
             <>
               <h3 className="text-lg font-semibold mb-2">Investment Returns Heatmap (First 50 Simulations)</h3>
-              <div className="mb-4">
-                <CanvasHeatmap data={results.allInvestmentReturns.slice(0, 50)} />
+              <div className="mb-4 flex flex-col items-center">
+                {heatmapData && heatmapData.length > 0 ? (
+                  <svg width={Math.max(600, 8 * nInvestments)} height={16 * nSimulationsHeatmap + 40} style={{ background: '#fff', borderRadius: 8, border: '1px solid #eee' }}>
+                    {/* Color grid */}
+                    {heatmapData.map((row, i) =>
+                      row.map((val, j) => {
+                        // Viridis colormap using chroma-js
+                        const color = chroma.scale('viridis').domain([heatmapStats.min, heatmapStats.max])(val).hex();
+                        return <rect key={i + '-' + j} x={j * 8} y={i * 16} width={8} height={16} fill={color} />;
+                      })
+                    )}
+                    {/* Axes labels */}
+                    <text x={8} y={16 * nSimulationsHeatmap + 20} fontSize={12} fill="#444">Investment Index →</text>
+                    <text x={-60} y={16 * nSimulationsHeatmap / 2} fontSize={12} fill="#444" transform={`rotate(-90 0,${16 * nSimulationsHeatmap / 2})`}>Simulation Number ↓</text>
+                  </svg>
+                ) : (
+                  <div className="py-8 text-center text-gray-500">No data to display heatmap.</div>
+                )}
+                {/* Stats box */}
+                {heatmapStats && (
+                  <div className="mt-4 p-2 bg-white border rounded shadow text-xs font-mono text-left" style={{ minWidth: 220 }}>
+                    <div><b>Statistics:</b></div>
+                    <div>Mean: {heatmapStats.mean.toFixed(4)}x</div>
+                    <div>Max: {heatmapStats.max.toFixed(2)}x</div>
+                    <div>Min: {heatmapStats.min.toFixed(4)}x</div>
+                    <div>Std: {heatmapStats.std.toFixed(4)}</div>
+                  </div>
+                )}
               </div>
             </>
           )}
@@ -879,222 +1049,33 @@ export function MoonfireSimulator({ layout }: { layout?: 'split' }) {
               )}
             </>
           )}
-          {/* Summary stats table (always visible) */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-6">
-            <div>
-              <div className="text-sm text-gray-500">Mean</div>
-              <div className="text-xl font-semibold">{results.mean.toFixed(3)}</div>
-            </div>
-            <div>
-              <div className="text-sm text-gray-500">Std Deviation</div>
-              <div className="text-xl font-semibold">{results.std.toFixed(3)}</div>
-            </div>
-            <div>
-              <div className="text-sm text-gray-500">Median</div>
-              <div className="text-xl font-semibold">{results.median.toFixed(3)}</div>
-            </div>
-            <div>
-              <div className="text-sm text-gray-500">Probability of Loss (Return &lt; 1x)</div>
-              <div className="text-xl font-semibold">{(results.probLoss * 100).toFixed(2)}%</div>
-            </div>
-            <div>
-              <div className="text-sm text-gray-500">Probability of 2x+</div>
-              <div className="text-xl font-semibold">{(results.prob2x * 100).toFixed(2)}%</div>
-            </div>
-            <div>
-              <div className="text-sm text-gray-500">Probability of 5x+</div>
-              <div className="text-xl font-semibold">{(results.prob5x * 100).toFixed(2)}%</div>
-            </div>
-            <div>
-              <div className="text-sm text-gray-500">Probability of 10x+</div>
-              <div className="text-xl font-semibold">{(results.prob10x * 100).toFixed(2)}%</div>
-            </div>
-            <div>
-              <div className="text-sm text-gray-500">1% Quantile</div>
-              <div className="text-xl font-semibold">{results.quantile01.toFixed(3)}</div>
-            </div>
-            <div>
-              <div className="text-sm text-gray-500">5% Quantile</div>
-              <div className="text-xl font-semibold">{results.quantile05.toFixed(3)}</div>
-            </div>
-            <div>
-              <div className="text-sm text-gray-500">10% Quantile</div>
-              <div className="text-xl font-semibold">{results.quantile10.toFixed(3)}</div>
-            </div>
-            <div>
-              <div className="text-sm text-gray-500">25% Quantile</div>
-              <div className="text-xl font-semibold">{results.quantile25.toFixed(3)}</div>
-            </div>
-            <div>
-              <div className="text-sm text-gray-500">75% Quantile</div>
-              <div className="text-xl font-semibold">{results.quantile75.toFixed(3)}</div>
-            </div>
-            <div>
-              <div className="text-sm text-gray-500">90% Quantile</div>
-              <div className="text-xl font-semibold">{results.quantile90.toFixed(3)}</div>
-            </div>
-            <div>
-              <div className="text-sm text-gray-500">95% Quantile</div>
-              <div className="text-xl font-semibold">{results.quantile95.toFixed(3)}</div>
-            </div>
-            <div>
-              <div className="text-sm text-gray-500">99% Quantile</div>
-              <div className="text-xl font-semibold">{results.quantile99.toFixed(3)}</div>
-            </div>
-            <div>
-              <div className="text-sm text-gray-500">Min Return</div>
-              <div className="text-xl font-semibold">{results.minReturn.toFixed(3)}</div>
-            </div>
-            <div>
-              <div className="text-sm text-gray-500">Max Return</div>
-              <div className="text-xl font-semibold">{results.maxReturn.toFixed(3)}</div>
-            </div>
-            <div>
-              <div className="text-sm text-gray-500">Execution Time</div>
-              <div className="text-xl font-semibold">{results.executionTime.toFixed(2)}s</div>
-            </div>
-          </div>
+          {tab === 'prob' && (
+            <>
+              <h3 className="text-lg font-semibold mb-2">Return Probabilities</h3>
+              {sizeLoading ? (
+                <div className="py-8 text-center text-gray-500">Simulating...</div>
+              ) : sizeAnalysis ? (
+                <div className="mb-4" style={{ width: '100%', height: 260 }}>
+                  <ResponsiveContainer width="100%" height={260}>
+                    <LineChart data={probData}>
+                      <CartesianGrid strokeDasharray="3 3" />
+                      <XAxis dataKey="size" />
+                      <YAxis label={{ value: 'Probability', angle: -90, position: 'insideLeft' }} domain={[0, 1]} />
+                      <Tooltip formatter={v => (v * 100).toFixed(1) + '%'} />
+                      <Legend />
+                      <Line type="monotone" dataKey="probLoss" stroke="#ef4444" name="Prob(Loss)" />
+                      <Line type="monotone" dataKey="prob2x" stroke="#10b981" name="Prob(2x+)" />
+                      <Line type="monotone" dataKey="prob10x" stroke="#a21caf" name="Prob(10x+)" />
+                    </LineChart>
+                  </ResponsiveContainer>
+                </div>
+              ) : (
+                <div className="py-8 text-center text-gray-500">Click the tab to run analysis.</div>
+              )}
+            </>
+          )}
         </Card>
       )}
     </div>
   );
 }
-
-// Simple boxplot component for a single array of numbers
-function BoxPlot({ data }: { data: number[] }) {
-  if (!data || data.length === 0) return <div className="text-xs text-gray-400">No data</div>;
-  const sorted = [...data].sort((a, b) => a - b);
-  const min = sorted[0];
-  const max = sorted[sorted.length - 1];
-  const q1 = quantile(sorted, 0.25);
-  const median = quantile(sorted, 0.5);
-  const q3 = quantile(sorted, 0.75);
-  // Render a horizontal boxplot
-  return (
-    <div style={{ display: 'flex', alignItems: 'center', height: 24 }}>
-      <div style={{ position: 'relative', width: 300, height: 16, background: '#f3f4f6', borderRadius: 4 }}>
-        {/* Whiskers */}
-        <div style={{ position: 'absolute', left: `${((q1 - min) / (max - min + 1e-8)) * 100}%`, width: `${((q3 - q1) / (max - min + 1e-8)) * 100}%`, height: 16, background: '#a78bfa', borderRadius: 4 }} />
-        {/* Median */}
-        <div style={{ position: 'absolute', left: `${((median - min) / (max - min + 1e-8)) * 100}%`, width: 2, height: 16, background: '#2563eb' }} />
-        {/* Min/Max ticks */}
-        <div style={{ position: 'absolute', left: 0, width: 2, height: 16, background: '#6b7280' }} />
-        <div style={{ position: 'absolute', right: 0, width: 2, height: 16, background: '#6b7280' }} />
-      </div>
-      <div className="ml-4 text-xs text-gray-500">
-        Min: {min.toFixed(2)} | Q1: {q1.toFixed(2)} | Median: {median.toFixed(2)} | Q3: {q3.toFixed(2)} | Max: {max.toFixed(2)}
-      </div>
-    </div>
-  );
-}
-
-// Replace ImprovedHeatmap with CanvasHeatmap
-function CanvasHeatmap({ data }: { data: number[][] }) {
-  const canvasRef = useRef<HTMLCanvasElement>(null);
-  if (!data || !data.length) return null;
-  const nSims = data.length;
-  const nInv = data[0]?.length || 0;
-  const flat = data.flat();
-  const min = Math.min(...flat);
-  const max = Math.max(...flat);
-  const mean = flat.reduce((a, b) => a + b, 0) / flat.length;
-  const std = Math.sqrt(flat.reduce((a, b) => a + (b - mean) ** 2, 0) / flat.length);
-  const median = flat.length ? [...flat].sort((a, b) => a - b)[Math.floor(flat.length / 2)] : 0;
-
-  // Viridis color scale (256 stops)
-  const viridis = [
-    [68, 1, 84],[71, 44, 122],[59, 81, 139],[44, 113, 142],[33, 144, 141],[39, 173, 129],[92, 200, 99],[170, 220, 50],[253, 231, 37]
-  ];
-  function getViridisColor(t: number) {
-    // t in [0,1]
-    if (t <= 0) return `rgb(${viridis[0].join(',')})`;
-    if (t >= 1) return `rgb(${viridis[viridis.length-1].join(',')})`;
-    const idx = t * (viridis.length - 1);
-    const i = Math.floor(idx);
-    const frac = idx - i;
-    const c0 = viridis[i];
-    const c1 = viridis[i + 1];
-    const r = Math.round(c0[0] + frac * (c1[0] - c0[0]));
-    const g = Math.round(c0[1] + frac * (c1[1] - c0[1]));
-    const b = Math.round(c0[2] + frac * (c1[2] - c0[2]));
-    return `rgb(${r},${g},${b})`;
-  }
-
-  // Draw heatmap on canvas
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
-    // Set canvas size
-    const cellW = 12, cellH = 12;
-    canvas.width = nInv * cellW;
-    canvas.height = nSims * cellH;
-    // Draw cells
-    for (let i = 0; i < nSims; i++) {
-      for (let j = 0; j < nInv; j++) {
-        const val = data[i][j];
-        const t = (val - min) / (max - min + 1e-8);
-        ctx.fillStyle = getViridisColor(t);
-        ctx.fillRect(j * cellW, i * cellH, cellW, cellH);
-      }
-    }
-    // Draw grid
-    ctx.strokeStyle = 'rgba(0,0,0,0.08)';
-    for (let i = 0; i <= nSims; i++) {
-      ctx.beginPath();
-      ctx.moveTo(0, i * cellH);
-      ctx.lineTo(nInv * cellW, i * cellH);
-      ctx.stroke();
-    }
-    for (let j = 0; j <= nInv; j++) {
-      ctx.beginPath();
-      ctx.moveTo(j * cellW, 0);
-      ctx.lineTo(j * cellW, nSims * cellH);
-      ctx.stroke();
-    }
-  }, [data, nSims, nInv, min, max]);
-
-  // Colorbar as SVG
-  const colorbarStops = 120;
-  const colorbar = Array.from({ length: colorbarStops }, (_, i) => getViridisColor(i / (colorbarStops - 1)));
-
-  return (
-    <div className="w-full flex flex-col items-center">
-      <div className="mb-2 text-xs text-gray-600 text-center font-medium">
-        Each cell shows the return for a given simulation (row) and investment (column). Colors: purple/blue (low), green (mid), yellow (high).
-      </div>
-      <div className="flex flex-col items-center border rounded bg-white p-2 shadow-sm">
-        <div className="flex items-center justify-between w-full mb-1">
-          <span className="text-xs text-gray-500">Simulation Number (↓)</span>
-          <span className="text-xs text-gray-500">Investment Index (→)</span>
-        </div>
-        <div style={{ overflow: 'auto', border: '1px solid #eee', borderRadius: 4, background: '#f9fafb', maxWidth: '100%' }}>
-          <canvas ref={canvasRef} style={{ display: 'block', maxWidth: '100%', height: nSims * 12, width: nInv * 12 }} />
-        </div>
-        {/* Colorbar */}
-        <div className="flex items-center gap-2 mt-2 w-full">
-          <span className="text-xs text-gray-500">Low</span>
-          <svg width={colorbarStops} height={12} style={{ borderRadius: 4, border: '1px solid #eee' }}>
-            {colorbar.map((c, i) => (
-              <rect key={i} x={i} y={0} width={1} height={12} fill={c} />
-            ))}
-          </svg>
-          <span className="text-xs text-gray-500">High</span>
-          <span className="text-xs text-gray-500 ml-4">Min: {min.toFixed(2)}</span>
-          <span className="text-xs text-gray-500">Mean: {mean.toFixed(2)}</span>
-          <span className="text-xs text-gray-500">Max: {max.toFixed(2)}</span>
-        </div>
-        {/* Stats box */}
-        <div className="mt-2 p-2 bg-gray-50 border border-gray-200 rounded text-xs text-gray-700 font-mono w-full max-w-xs">
-          <div><b>Statistics:</b></div>
-          <div>Mean: {mean.toFixed(4)}x</div>
-          <div>Median: {median.toFixed(4)}x</div>
-          <div>Max: {max.toFixed(2)}x</div>
-          <div>Min: {min.toFixed(4)}x</div>
-          <div>Std: {std.toFixed(4)}</div>
-        </div>
-      </div>
-    </div>
-  );
-} 
