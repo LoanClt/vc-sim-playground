@@ -20,6 +20,7 @@ import { ShareDialog, LoadSharedParameters, SaveSimulationResults } from './comp
 import { SimulatorControl } from './components/simulator';
 import type { Investment } from './lib/store';
 import { MoonfireSimulator } from './components/moonfire-simulator';
+import { Analytics } from "@vercel/analytics/next";
 
 // Update ConfettiBurst to accept x/y coordinates
 function ConfettiBurst({ trigger, x, y }: { trigger: boolean; x: number; y: number }) {
@@ -1928,6 +1929,7 @@ function App() {
           </Dialog>
         </>
       )}
+      <Analytics />
     </div>
   );
 }
