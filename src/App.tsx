@@ -5,7 +5,7 @@ import { Bar, BarChart, XAxis, YAxis, CartesianGrid, Tooltip, Legend, Responsive
 import { PieChart, Pie } from 'recharts';
 import { Card } from './components/ui/card';
 import { Button } from './components/ui/button';
-import { FileDown, FileUp, Eye, EyeOff, ExternalLink, Rocket, ArrowLeft, ArrowRight, Star } from 'lucide-react';
+import { FileDown, FileUp, Eye, EyeOff, ExternalLink, Rocket, ArrowLeft, ArrowRight, Star, AlertTriangle, Info } from 'lucide-react';
 import { toast, Toaster } from 'sonner';
 import { cn } from './lib/utils';
 import { useVCFundStore } from './lib/store';
@@ -20,6 +20,8 @@ import { ShareDialog, LoadSharedParameters, SaveSimulationResults } from './comp
 import { SimulatorControl } from './components/simulator';
 import type { Investment } from './lib/store';
 import { MoonfireSimulator } from './components/moonfire-simulator';
+import { BlockMath, InlineMath } from 'react-katex';
+import 'katex/dist/katex.min.css';
 
 // Update ConfettiBurst to accept x/y coordinates
 function ConfettiBurst({ trigger, x, y }: { trigger: boolean; x: number; y: number }) {
@@ -493,6 +495,8 @@ function App() {
   });
   const [showMoonfire, setShowMoonfire] = useState(false);
   const [isFundMode, setIsFundMode] = useState(true);
+  // Add state for info dialog
+  const [showFundInfo, setShowFundInfo] = useState(false);
 
   // Handle portfolio import
   const handleImportClick = () => {
@@ -696,13 +700,9 @@ function App() {
         <Button 
           variant={isPortfolioMode && !showMoonfire ? 'default' : 'outline'}
           onClick={() => {
-            if (portfolioUnlocked) {
-              setIsPortfolioMode(true);
-              setShowMoonfire(false);
-              setIsFundMode(false);
-            } else {
-              setShowPasswordDialog(true);
-            }
+            setIsPortfolioMode(true);
+            setShowMoonfire(false);
+            setIsFundMode(false);
           }}
           className="px-6"
         >
@@ -716,6 +716,15 @@ function App() {
           Power-Law
         </Button>
       </div>
+      {/* Show beta warning only on Portfolio simulation page */}
+      {isPortfolioMode && !showMoonfire && (
+        <div className="flex items-center justify-center mb-4">
+          <span className="flex items-center text-xs text-yellow-700 bg-yellow-100 rounded px-2 py-1 gap-1">
+            <AlertTriangle className="w-4 h-4 text-yellow-500" />
+            Portfolio simulation is in Beta. 
+          </span>
+        </div>
+      )}
       {showMoonfire ? (
         <MoonfireSimulator layout="split" />
       ) : (
@@ -1573,6 +1582,15 @@ function App() {
                       >
                         {useVCFundStore.getState().isSimulating ? 'Simulating...' : 'Run Simulation'}
                       </Button>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => setShowFundInfo(true)}
+                        className="flex items-center gap-1"
+                        aria-label="Simulation Info"
+                      >
+                        <Info className="w-4 h-4" /> Info
+                      </Button>
                       {results && <SaveSimulationResults resultsRef={resultsRef} />}
                     </div>
                   </div>
@@ -1923,6 +1941,62 @@ function App() {
                 >
                   Cancel
                 </button>
+              </DialogFooter>
+            </DialogContent>
+          </Dialog>
+          {/* Fund Simulation Info Dialog */}
+          <Dialog open={showFundInfo} onOpenChange={setShowFundInfo}>
+            <DialogContent className="max-w-2xl p-0">
+              <DialogHeader className="bg-blue-600 rounded-t-lg p-4">
+                <DialogTitle className="text-white text-2xl">Fund Simulation: Underlying Principles & Math</DialogTitle>
+              </DialogHeader>
+              <div className="max-h-[60vh] overflow-y-auto p-6">
+                <div className="prose max-w-none text-sm">
+                  <h3 className="text-blue-700 text-lg font-bold mt-0 mb-2">Overview</h3>
+                  <p className="mb-6">This simulation models the performance of a venture capital fund by simulating investments across multiple companies and stages, using probabilistic advancement, dilution, and exit outcomes. The results provide metrics such as <span className='font-semibold text-blue-700'>MOIC</span> (Multiple on Invested Capital), <span className='font-semibold text-blue-700'>IRR</span> (Internal Rate of Return), <span className='font-semibold text-blue-700'>DPI</span> (Distributed to Paid-In), and more.</p>
+                  <h3 className="text-blue-700 text-lg font-bold mb-2">Simulation Steps</h3>
+                  <ol className="list-decimal pl-6 mb-6">
+                    <li><b>Stage Allocation:</b> The fund is split across stages (Pre-Seed, Seed, Series A, Series B) according to user-defined percentages.</li>
+                    <li><b>Investment Generation:</b> For each stage, investments are made until the allocated capital is used. Each investment has a random <i>entry valuation</i> and <i>check size</i> within user-specified ranges.</li>
+                    <li><b>Equity Calculation:</b> For each investment, equity is calculated as:
+                      <BlockMath math={"equity = \\frac{check\\ size}{entry\\ valuation}"} />
+                    </li>
+                    <li><b>Stage Progression:</b> Each investment can advance to the next stage with a user-defined probability. On each advancement, equity is diluted:
+                      <BlockMath math={"equity_{new} = equity_{old} \\times (1 - dilution)"} />
+                    </li>
+                    <li><b>Exit or Loss:</b> At the final stage reached, the investment either exits (with a random exit valuation) or is lost (with a user-defined probability):
+                      <ul className="list-disc pl-6">
+                        <li>If not lost: <InlineMath math={"exit\\ amount = equity \\times exit\\ valuation"} /></li>
+                        <li>If lost: <InlineMath math={"exit\\ amount = 0"} /></li>
+                      </ul>
+                    </li>
+                    <li><b>Simulation Repeats:</b> The above steps are repeated for the specified number of simulations.</li>
+                    <li><b>Metrics Computed:</b>
+                      <ul className="list-disc pl-6">
+                        <li><b>MOIC:</b> <InlineMath math={"MOIC = \\frac{total\\ distributed}{total\\ paid-in}"} /></li>
+                        <li><b>DPI:</b> <InlineMath math={"DPI = \\frac{distributed}{paid-in}"} /></li>
+                        <li><b>IRR:</b> Approximated as <InlineMath math={"IRR = (MOIC^{1/5} - 1) \\times 100"} /> (assuming a 5-year period)</li>
+                      </ul>
+                    </li>
+                  </ol>
+                  <h3 className="text-blue-700 text-lg font-bold mb-2">Key Equations</h3>
+                  <ul className="list-disc pl-6 mb-6">
+                    <li><b>Equity after dilution:</b> <BlockMath math={"equity_n = equity_{n-1} \\times (1 - dilution_n)"} /></li>
+                    <li><b>Exit amount:</b> <BlockMath math={"exit = equity \\times exit\\ valuation"} /></li>
+                    <li><b>MOIC:</b> <BlockMath math={"MOIC = \\frac{\\sum exit\\ amounts}{\\sum check\\ sizes}"} /></li>
+                  </ul>
+                  <h3 className="text-blue-700 text-lg font-bold mb-2">Randomness</h3>
+                  <p className="mb-6">All probabilities (stage advancement, loss, valuations) are sampled randomly within the user-specified ranges for each simulation run.</p>
+                  <h3 className="text-blue-700 text-lg font-bold mb-2">Assumptions</h3>
+                  <ul className="list-disc pl-6 mb-6">
+                    <li>All investments are independent.</li>
+                    <li>All capital is deployed at the start.</li>
+                    <li>IRR is simplified for illustration.</li>
+                  </ul>
+                </div>
+              </div>
+              <DialogFooter className="bg-blue-50 rounded-b-lg p-4 flex justify-end">
+                <Button onClick={() => setShowFundInfo(false)} variant="default">Close</Button>
               </DialogFooter>
             </DialogContent>
           </Dialog>

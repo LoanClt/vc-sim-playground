@@ -9,6 +9,8 @@ import chroma from 'chroma-js';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from './ui/dialog';
 import { Popover, PopoverTrigger, PopoverContent } from './ui/popover';
 import { Slider } from './ui/slider';
+import { BlockMath, InlineMath } from 'react-katex';
+import 'katex/dist/katex.min.css';
 
 // Bounded Pareto distribution (power law) as in the Python code
 function boundedParetoRVS(alpha: number, xMin: number, xMax: number, size: number): number[] {
@@ -213,6 +215,26 @@ export function MoonfireSimulator({ layout }: { layout?: 'split' }) {
   const [selectedProbability, setSelectedProbability] = useState('probLoss');
   const [shareDialogOpen, setShareDialogOpen] = useState(false);
   const [shareUrl, setShareUrl] = useState('');
+  const [showInfo, setShowInfo] = useState(false);
+  // Add state for histogram x-axis range
+  const [histXMin, setHistXMin] = useState<number | null>(null);
+  const [histXMax, setHistXMax] = useState<number | null>(null);
+  // Add local state for input fields
+  const [pendingHistXMin, setPendingHistXMin] = useState<string>('');
+  const [pendingHistXMax, setPendingHistXMax] = useState<string>('');
+  // Add state for toggling reference lines on the histogram
+  const [showMean, setShowMean] = useState(true);
+  const [showMedian, setShowMedian] = useState(true);
+  const [showBreakEven, setShowBreakEven] = useState(true);
+
+  // Sync input fields to results or histXMin/Max when results change
+  useEffect(() => {
+    if (results) {
+      setPendingHistXMin((histXMin !== null ? histXMin : results.minReturn).toString());
+      setPendingHistXMax((histXMax !== null ? histXMax : results.maxReturn).toString());
+    }
+    // eslint-disable-next-line
+  }, [results]);
 
   // Only run simulation when user clicks the button
   const handleRunSimulation = () => {
@@ -260,23 +282,26 @@ export function MoonfireSimulator({ layout }: { layout?: 'split' }) {
   }) : [];
 
   // Histogram data (linear)
-  let histData: { bin: string; count: number }[] = [];
+  let histData: { bin: string; binStart: number; count: number }[] = [];
   let logHistData: { bin: string; count: number }[] = [];
   let cdfData: { x: number; p: number }[] = [];
   if (results) {
     // Linear histogram
     const binCount = 30;
-    const min = results.minReturn;
-    const max = results.maxReturn;
+    // Use user-selected range if set, else full range
+    const min = histXMin !== null ? histXMin : results.minReturn;
+    const max = histXMax !== null ? histXMax : results.maxReturn;
     const binSize = (max - min) / binCount;
     const bins = Array(binCount).fill(0);
     results.portfolioReturns.forEach((val: number) => {
+      if (val < min || val > max) return;
       let idx = Math.floor((val - min) / binSize);
       if (idx >= binCount) idx = binCount - 1;
       bins[idx]++;
     });
     histData = bins.map((count, i) => ({
       bin: `${(min + i * binSize).toFixed(2)}-${(min + (i + 1) * binSize).toFixed(2)}`,
+      binStart: min + i * binSize,
       count
     }));
     // Log-scale histogram
@@ -471,9 +496,25 @@ export function MoonfireSimulator({ layout }: { layout?: 'split' }) {
             <Card className="p-6">
               <div className="flex justify-between items-center mb-4">
                 <h2 className="text-xl font-semibold">Simulation Results</h2>
-                <Button onClick={handleRunSimulation} disabled={loading} size="sm">
-                  {loading ? 'Simulating...' : 'Run Simulation'}
-                </Button>
+                <div className="flex gap-2 items-center">
+                  <Button
+                    variant="default"
+                    size="sm"
+                    onClick={handleRunSimulation}
+                    disabled={loading}
+                  >
+                    {loading ? 'Simulating...' : 'Run Simulation'}
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => setShowInfo(true)}
+                    className="flex items-center gap-1"
+                    aria-label="Simulation Info"
+                  >
+                    <Info className="w-4 h-4" /> Info
+                  </Button>
+                </div>
               </div>
               {results && (
                 <>
@@ -491,17 +532,77 @@ export function MoonfireSimulator({ layout }: { layout?: 'split' }) {
                   {tab === 'hist' && (
                     <>
                       <h3 className="text-lg font-semibold mb-2">Portfolio Return Distribution</h3>
+                      {/* Reference line toggles */}
+                      <div className="flex items-center gap-4 mb-2">
+                        <label className="flex items-center gap-1 text-xs">
+                          <input type="checkbox" checked={showMean} onChange={e => setShowMean(e.target.checked)} /> Show Mean
+                        </label>
+                        <label className="flex items-center gap-1 text-xs">
+                          <input type="checkbox" checked={showMedian} onChange={e => setShowMedian(e.target.checked)} /> Show Median
+                        </label>
+                        <label className="flex items-center gap-1 text-xs">
+                          <input type="checkbox" checked={showBreakEven} onChange={e => setShowBreakEven(e.target.checked)} /> Show Break-even
+                        </label>
+                      </div>
+                      {/* X-axis range controls */}
+                      {results && (
+                        <div className="flex items-center gap-2 mb-2">
+                          <label className="text-xs font-medium">X-axis Range:</label>
+                          <input
+                            type="number"
+                            className="border rounded px-2 py-1 text-xs w-20"
+                            value={pendingHistXMin}
+                            min={results.minReturn}
+                            max={pendingHistXMax || results.maxReturn}
+                            step="0.01"
+                            onChange={e => setPendingHistXMin(e.target.value)}
+                          />
+                          <span className="text-xs">to</span>
+                          <input
+                            type="number"
+                            className="border rounded px-2 py-1 text-xs w-20"
+                            value={pendingHistXMax}
+                            min={pendingHistXMin || results.minReturn}
+                            max={results.maxReturn}
+                            step="0.01"
+                            onChange={e => setPendingHistXMax(e.target.value)}
+                          />
+                          <button
+                            className="ml-2 px-2 py-1 text-xs rounded bg-blue-100 border border-blue-300 hover:bg-blue-200 text-blue-700"
+                            onClick={() => {
+                              setHistXMin(Number(pendingHistXMin));
+                              setHistXMax(Number(pendingHistXMax));
+                            }}
+                          >Update</button>
+                          <button
+                            className="ml-1 px-2 py-1 text-xs rounded bg-gray-100 border border-gray-300 hover:bg-gray-200 text-gray-700"
+                            onClick={() => {
+                              setHistXMin(null);
+                              setHistXMax(null);
+                              setPendingHistXMin(results.minReturn.toString());
+                              setPendingHistXMax(results.maxReturn.toString());
+                            }}
+                          >Reset</button>
+                        </div>
+                      )}
                       <div className="mb-4" style={{ width: '100%', height: 240 }}>
                         <ResponsiveContainer width="100%" height={240}>
-                          <BarChart data={histData}>
+                          <BarChart data={histData} margin={{ left: 80, right: 20, top: 20, bottom: 40 }}>
                             <CartesianGrid strokeDasharray="3 3" />
-                            <XAxis dataKey="bin" interval={4} angle={-30} textAnchor="end" height={60} />
-                            <YAxis />
-                            <Tooltip />
-                            <Bar dataKey="count" fill="#60a5fa" />
-                            <ReferenceLine x={results.mean.toFixed(2)} stroke="green" label="Mean" />
-                            <ReferenceLine x={results.median.toFixed(2)} stroke="orange" label="Median" />
-                            <ReferenceLine x={1} stroke="red" label="Break-even" />
+                            <XAxis
+                              dataKey="binStart"
+                              type="number"
+                              domain={[(histXMin !== null ? histXMin : results?.minReturn) || 0, (histXMax !== null ? histXMax : results?.maxReturn) || 1]}
+                              label={{ value: 'Portfolio Return', position: 'bottom', offset: 20 }}
+                              tickFormatter={v => v.toFixed(2)}
+                              allowDataOverflow={true}
+                            />
+                            <YAxis label={{ value: 'Count', angle: -90, position: 'left', offset: 40 }} />
+                            <Tooltip labelFormatter={(_, i) => histData[i]?.bin || ''} />
+                            <Bar dataKey="count" fill="#60a5fa" name="Count" />
+                            {showMean && <ReferenceLine x={results.mean} stroke="green" label="Mean" />}
+                            {showMedian && <ReferenceLine x={results.median} stroke="orange" label="Median" />}
+                            {showBreakEven && <ReferenceLine x={1} stroke="red" label="Break-even" />}
                           </BarChart>
                         </ResponsiveContainer>
                       </div>
@@ -512,10 +613,10 @@ export function MoonfireSimulator({ layout }: { layout?: 'split' }) {
                       <h3 className="text-lg font-semibold mb-2">Log-Scale Portfolio Return Distribution</h3>
                       <div className="mb-4" style={{ width: '100%', height: 240 }}>
                         <ResponsiveContainer width="100%" height={240}>
-                          <BarChart data={logHistData}>
+                          <BarChart data={logHistData} margin={{ left: 60, right: 20, top: 20, bottom: 30 }}>
                             <CartesianGrid strokeDasharray="3 3" />
-                            <XAxis dataKey="bin" interval={4} angle={-30} textAnchor="end" height={60} />
-                            <YAxis />
+                            <XAxis dataKey="bin" interval={4} angle={-30} textAnchor="end" height={60} label={{ value: 'Log Portfolio Return', position: 'insideBottom', offset: -5 }} />
+                            <YAxis label={{ value: 'Count', angle: -90, position: 'insideLeft', offset: 20 }} />
                             <Tooltip />
                             <Bar dataKey="count" fill="#fbbf24" />
                           </BarChart>
@@ -528,10 +629,10 @@ export function MoonfireSimulator({ layout }: { layout?: 'split' }) {
                       <h3 className="text-lg font-semibold mb-2">Cumulative Distribution Function (CDF)</h3>
                       <div className="mb-4" style={{ width: '100%', height: 240 }}>
                         <ResponsiveContainer width="100%" height={240}>
-                          <ComposedChart data={cdfData}>
+                          <ComposedChart data={cdfData} margin={{ left: 60, right: 20, top: 20, bottom: 30 }}>
                             <CartesianGrid strokeDasharray="3 3" />
-                            <XAxis dataKey="x" type="number" domain={['auto', 'auto']} />
-                            <YAxis dataKey="p" type="number" domain={[0, 1]} />
+                            <XAxis dataKey="x" type="number" domain={['auto', 'auto']} label={{ value: 'Portfolio Return', position: 'insideBottom', offset: -5 }} />
+                            <YAxis dataKey="p" type="number" domain={[0, 1]} label={{ value: 'Cumulative Probability', angle: -90, position: 'insideLeft', offset: 20 }} />
                             <Tooltip />
                             <Line type="monotone" dataKey="p" stroke="#6366f1" dot={false} />
                             <ReferenceLine x={1} stroke="red" label="Break-even" />
@@ -546,27 +647,18 @@ export function MoonfireSimulator({ layout }: { layout?: 'split' }) {
                       {sizeLoading ? (
                         <div className="py-8 text-center text-gray-500">Simulating...</div>
                       ) : sizeAnalysis ? (
-                        (() => {
-                          // Filter out invalid or non-finite sharpe values
-                          const validSharpeData = sizeAnalysis.filter(r => Number.isFinite(r.sharpe));
-                          if (!validSharpeData.length) {
-                            return <div className="py-8 text-center text-gray-500">No valid data to plot Sharpe Ratio.</div>;
-                          }
-                          return (
-                            <div className="mb-4" style={{ width: '100%', height: 260 }}>
-                              <ResponsiveContainer width="100%" height={260}>
-                                <LineChart data={validSharpeData}>
-                                  <CartesianGrid strokeDasharray="3 3" />
-                                  <XAxis dataKey="size" />
-                                  <YAxis label={{ value: 'Sharpe Ratio', angle: -90, position: 'insideLeft' }} />
-                                  <Tooltip />
-                                  <Legend />
-                                  <Line type="monotone" dataKey="sharpe" stroke="#10b981" name="Sharpe Ratio" />
-                                </LineChart>
-                              </ResponsiveContainer>
-                            </div>
-                          );
-                        })()
+                        <div className="mb-4" style={{ width: '100%', height: 340 }}>
+                          <ResponsiveContainer width="100%" height={340}>
+                            <LineChart data={sizeAnalysis} margin={{ left: 60, right: 20, top: 20, bottom: 30 }}>
+                              <CartesianGrid strokeDasharray="3 3" />
+                              <XAxis dataKey="size" label={{ value: 'Portfolio Size', position: 'insideBottom', offset: -5 }} />
+                              <YAxis label={{ value: 'Sharpe Ratio', angle: -90, position: 'insideLeft', offset: 20 }} />
+                              <Tooltip />
+                              <Legend />
+                              <Line type="monotone" dataKey="sharpe" stroke="#10b981" name="Sharpe Ratio" />
+                            </LineChart>
+                          </ResponsiveContainer>
+                        </div>
                       ) : (
                         <div className="py-8 text-center text-gray-500">Click the tab to run analysis.</div>
                       )}
@@ -577,10 +669,10 @@ export function MoonfireSimulator({ layout }: { layout?: 'split' }) {
                       <h3 className="text-lg font-semibold mb-2">Portfolio Return Quantiles</h3>
                       <div className="mb-4" style={{ width: '100%', height: 240 }}>
                         <ResponsiveContainer width="100%" height={240}>
-                          <BarChart data={quantileData}>
+                          <BarChart data={quantileData} margin={{ left: 60, right: 20, top: 20, bottom: 30 }}>
                             <CartesianGrid strokeDasharray="3 3" />
-                            <XAxis dataKey="q" />
-                            <YAxis />
+                            <XAxis dataKey="q" label={{ value: 'Quantile', position: 'insideBottom', offset: -5 }} />
+                            <YAxis label={{ value: 'Return', angle: -90, position: 'insideLeft', offset: 20 }} />
                             <Tooltip />
                             <Bar dataKey="value" fill="#a78bfa" />
                           </BarChart>
@@ -727,12 +819,12 @@ export function MoonfireSimulator({ layout }: { layout?: 'split' }) {
                       {sizeLoading ? (
                         <div className="py-8 text-center text-gray-500">Simulating...</div>
                       ) : sizeAnalysis ? (
-                        <div className="mb-4" style={{ width: '100%', height: 260 }}>
-                          <ResponsiveContainer width="100%" height={260}>
-                            <LineChart data={probData}>
+                        <div className="mb-4" style={{ width: '100%', height: 340 }}>
+                          <ResponsiveContainer width="100%" height={340}>
+                            <LineChart data={probData} margin={{ left: 60, right: 20, top: 20, bottom: 30 }}>
                               <CartesianGrid strokeDasharray="3 3" />
-                              <XAxis dataKey="size" />
-                              <YAxis label={{ value: 'Probability', angle: -90, position: 'insideLeft' }} domain={[0, 1]} />
+                              <XAxis dataKey="size" label={{ value: 'Portfolio Size', position: 'insideBottom', offset: -5 }} />
+                              <YAxis label={{ value: 'Probability', angle: -90, position: 'insideLeft', offset: 20 }} domain={[0, 1]} />
                               <Tooltip formatter={v => (v * 100).toFixed(1) + '%'} />
                               <Legend />
                               <Line type="monotone" dataKey="probLoss" stroke="#ef4444" name="Prob(Loss)" />
@@ -790,6 +882,59 @@ export function MoonfireSimulator({ layout }: { layout?: 'split' }) {
                 </>
               )}
             </Card>
+            {/* Power-Law Simulation Info Dialog */}
+            <Dialog open={showInfo} onOpenChange={setShowInfo}>
+              <DialogContent className="max-w-2xl p-0">
+                <DialogHeader className="bg-blue-600 rounded-t-lg p-4">
+                  <DialogTitle className="text-white text-2xl">Power-Law Simulation: Principles & Math</DialogTitle>
+                </DialogHeader>
+                <div className="max-h-[60vh] overflow-y-auto p-6">
+                  <div className="prose max-w-none text-sm">
+                    <h3 className="text-blue-700 text-lg font-bold mt-0 mb-2">Overview</h3>
+                    <p className="mb-6">This simulation models the returns of a portfolio of investments drawn from a bounded Pareto (power-law) distribution, which is often used to describe venture capital and startup outcomes. The simulation helps visualize the impact of power-law dynamics on portfolio returns, quantiles, and probabilities of large outcomes.</p>
+                    <h3 className="text-blue-700 text-lg font-bold mb-2">Simulation Steps</h3>
+                    <ol className="list-decimal pl-6 mb-6">
+                      <li><b>Draw Returns:</b> For each simulation, sample <InlineMath math={"N"} /> investments from a bounded Pareto distribution with parameters <InlineMath math={"\\alpha"} />, <InlineMath math={"x_{min}"} />, and <InlineMath math={"x_{max}"} />.</li>
+                      <li><b>Bounded Pareto Distribution:</b> Each investment return <InlineMath math={"X"} /> is drawn from:
+                        <BlockMath math={"P(X > x) = (x_{min}/x)^{\\alpha},\\ x_{min} \\leq x \\leq x_{max}"} />
+                      </li>
+                      <li><b>Portfolio Return:</b> The total portfolio return is the sum of all investment returns:
+                        <BlockMath math={"R_{portfolio} = \\sum_{i=1}^N X_i"} />
+                      </li>
+                      <li><b>Repeat:</b> Repeat the above steps for the specified number of simulations to build a distribution of portfolio outcomes.</li>
+                      <li><b>Statistics:</b> Compute mean, median, standard deviation, quantiles, and probabilities (e.g., probability of loss, 2x, 5x, 10x returns).</li>
+                    </ol>
+                    <h3 className="text-blue-700 text-lg font-bold mb-2">Key Equations</h3>
+                    <ul className="list-disc pl-6 mb-6">
+                      <li><b>Pareto CDF:</b> <BlockMath math={"P(X > x) = (x_{min}/x)^{\\alpha}"} /></li>
+                      <li><b>Portfolio Return:</b> <BlockMath math={"R_{portfolio} = \\sum_{i=1}^N X_i"} /></li>
+                      <li><b>Mean Return:</b> <BlockMath math={"\\mu = E[R_{portfolio}]"} /></li>
+                      <li><b>Standard Deviation:</b> <BlockMath math={"\\sigma = std(R_{portfolio})"} /></li>
+                      <li><b>Quantiles:</b> <BlockMath math={"Q_p = \\text{Quantile at probability } p"} /></li>
+                    </ul>
+                    <h3 className="text-blue-700 text-lg font-bold mb-2">Return Distribution by Size</h3>
+                    <p className="mb-6">This graph shows how the distribution of portfolio returns changes as the number of investments in the portfolio increases. Each curve represents the probability density of returns for a different portfolio size (e.g., 10, 25, 50, 100, 200, 500). As the portfolio size grows, the distribution typically becomes narrower and more centered, illustrating the effect of diversification in reducing risk and the impact of the power-law on portfolio outcomes.</p>
+                    <h3 className="text-blue-700 text-lg font-bold mb-2">Risk-Adjusted Performance (Sharpe Ratio)</h3>
+                    <p className="mb-6">The Sharpe Ratio is a measure of risk-adjusted return, calculated as (mean return - 1) divided by the standard deviation of returns. In this context, it shows how much excess return (over break-even) is achieved per unit of risk for different portfolio sizes. Higher Sharpe Ratios indicate better risk-adjusted performance. The graph helps you see how increasing the number of investments can improve the risk-return profile of a power-law portfolio.</p>
+                    <h3 className="text-blue-700 text-lg font-bold mb-2">Assumptions</h3>
+                    <ul className="list-disc pl-6 mb-6">
+                      <li>Investment returns are independent and identically distributed (i.i.d.).</li>
+                      <li>All capital is deployed equally across investments.</li>
+                      <li>The power-law exponent <InlineMath math={"\\alpha"} /> and bounds <InlineMath math={"x_{min}, x_{max}"} /> are user-defined.</li>
+                    </ul>
+                    <h3 className="text-blue-700 text-lg font-bold mb-2">Further Reading</h3>
+                    <ul className="list-disc pl-6 mb-2">
+                      <li><a href="https://arxiv.org/pdf/2303.11013" target="_blank" rel="noopener noreferrer" className="text-blue-700 underline">Venture Capital Portfolio Construction (Moonfire Ventures)</a></li>
+                    </ul>
+                    <h3 className="text-blue-700 text-lg font-bold mb-2">Cumulative Distribution Function (CDF) & Break-even</h3>
+                    <p className="mb-6">The CDF graph shows, for each possible portfolio return, the probability that a simulation achieves a return less than or equal to that value. The X-axis represents the portfolio return (e.g., 1x, 2x), and the Y-axis shows the cumulative probability (from 0 to 1). The red vertical line at x = 1 marks the <b>break-even</b> point, where the portfolio returns exactly the invested capital. The height of the CDF at x = 1 tells you the probability of not breaking even (i.e., the chance of a loss). Values to the right of this line represent profitable outcomes, while values to the left indicate a loss.</p>
+                  </div>
+                </div>
+                <DialogFooter className="bg-blue-50 rounded-b-lg p-4 flex justify-end">
+                  <Button onClick={() => setShowInfo(false)} variant="default">Close</Button>
+                </DialogFooter>
+              </DialogContent>
+            </Dialog>
           </div>
         </div>
         <Dialog open={shareDialogOpen} onOpenChange={setShareDialogOpen}>
@@ -913,17 +1058,77 @@ export function MoonfireSimulator({ layout }: { layout?: 'split' }) {
           {tab === 'hist' && (
             <>
               <h3 className="text-lg font-semibold mb-2">Portfolio Return Distribution</h3>
+              {/* Reference line toggles */}
+              <div className="flex items-center gap-4 mb-2">
+                <label className="flex items-center gap-1 text-xs">
+                  <input type="checkbox" checked={showMean} onChange={e => setShowMean(e.target.checked)} /> Show Mean
+                </label>
+                <label className="flex items-center gap-1 text-xs">
+                  <input type="checkbox" checked={showMedian} onChange={e => setShowMedian(e.target.checked)} /> Show Median
+                </label>
+                <label className="flex items-center gap-1 text-xs">
+                  <input type="checkbox" checked={showBreakEven} onChange={e => setShowBreakEven(e.target.checked)} /> Show Break-even
+                </label>
+              </div>
+              {/* X-axis range controls */}
+              {results && (
+                <div className="flex items-center gap-2 mb-2">
+                  <label className="text-xs font-medium">X-axis Range:</label>
+                  <input
+                    type="number"
+                    className="border rounded px-2 py-1 text-xs w-20"
+                    value={pendingHistXMin}
+                    min={results.minReturn}
+                    max={pendingHistXMax || results.maxReturn}
+                    step="0.01"
+                    onChange={e => setPendingHistXMin(e.target.value)}
+                  />
+                  <span className="text-xs">to</span>
+                  <input
+                    type="number"
+                    className="border rounded px-2 py-1 text-xs w-20"
+                    value={pendingHistXMax}
+                    min={pendingHistXMin || results.minReturn}
+                    max={results.maxReturn}
+                    step="0.01"
+                    onChange={e => setPendingHistXMax(e.target.value)}
+                  />
+                  <button
+                    className="ml-2 px-2 py-1 text-xs rounded bg-blue-100 border border-blue-300 hover:bg-blue-200 text-blue-700"
+                    onClick={() => {
+                      setHistXMin(Number(pendingHistXMin));
+                      setHistXMax(Number(pendingHistXMax));
+                    }}
+                  >Update</button>
+                  <button
+                    className="ml-1 px-2 py-1 text-xs rounded bg-gray-100 border border-gray-300 hover:bg-gray-200 text-gray-700"
+                    onClick={() => {
+                      setHistXMin(null);
+                      setHistXMax(null);
+                      setPendingHistXMin(results.minReturn.toString());
+                      setPendingHistXMax(results.maxReturn.toString());
+                    }}
+                  >Reset</button>
+                </div>
+              )}
               <div className="mb-4" style={{ width: '100%', height: 240 }}>
                 <ResponsiveContainer width="100%" height={240}>
-                  <BarChart data={histData}>
+                  <BarChart data={histData} margin={{ left: 80, right: 20, top: 20, bottom: 40 }}>
                     <CartesianGrid strokeDasharray="3 3" />
-                    <XAxis dataKey="bin" interval={4} angle={-30} textAnchor="end" height={60} />
-                    <YAxis />
-                    <Tooltip />
-                    <Bar dataKey="count" fill="#60a5fa" />
-                    <ReferenceLine x={results.mean.toFixed(2)} stroke="green" label="Mean" />
-                    <ReferenceLine x={results.median.toFixed(2)} stroke="orange" label="Median" />
-                    <ReferenceLine x={1} stroke="red" label="Break-even" />
+                    <XAxis
+                      dataKey="binStart"
+                      type="number"
+                      domain={[(histXMin !== null ? histXMin : results?.minReturn) || 0, (histXMax !== null ? histXMax : results?.maxReturn) || 1]}
+                      label={{ value: 'Portfolio Return', position: 'bottom', offset: 20 }}
+                      tickFormatter={v => v.toFixed(2)}
+                      allowDataOverflow={true}
+                    />
+                    <YAxis label={{ value: 'Count', angle: -90, position: 'left', offset: 40 }} />
+                    <Tooltip labelFormatter={(_, i) => histData[i]?.bin || ''} />
+                    <Bar dataKey="count" fill="#60a5fa" name="Count" />
+                    {showMean && <ReferenceLine x={results.mean} stroke="green" label="Mean" />}
+                    {showMedian && <ReferenceLine x={results.median} stroke="orange" label="Median" />}
+                    {showBreakEven && <ReferenceLine x={1} stroke="red" label="Break-even" />}
                   </BarChart>
                 </ResponsiveContainer>
               </div>
@@ -934,10 +1139,10 @@ export function MoonfireSimulator({ layout }: { layout?: 'split' }) {
               <h3 className="text-lg font-semibold mb-2">Log-Scale Portfolio Return Distribution</h3>
               <div className="mb-4" style={{ width: '100%', height: 240 }}>
                 <ResponsiveContainer width="100%" height={240}>
-                  <BarChart data={logHistData}>
+                  <BarChart data={logHistData} margin={{ left: 60, right: 20, top: 20, bottom: 30 }}>
                     <CartesianGrid strokeDasharray="3 3" />
-                    <XAxis dataKey="bin" interval={4} angle={-30} textAnchor="end" height={60} />
-                    <YAxis />
+                    <XAxis dataKey="bin" interval={4} angle={-30} textAnchor="end" height={60} label={{ value: 'Log Portfolio Return', position: 'insideBottom', offset: -5 }} />
+                    <YAxis label={{ value: 'Count', angle: -90, position: 'insideLeft', offset: 20 }} />
                     <Tooltip />
                     <Bar dataKey="count" fill="#fbbf24" />
                   </BarChart>
@@ -950,10 +1155,10 @@ export function MoonfireSimulator({ layout }: { layout?: 'split' }) {
               <h3 className="text-lg font-semibold mb-2">Cumulative Distribution Function (CDF)</h3>
               <div className="mb-4" style={{ width: '100%', height: 240 }}>
                 <ResponsiveContainer width="100%" height={240}>
-                  <ComposedChart data={cdfData}>
+                  <ComposedChart data={cdfData} margin={{ left: 60, right: 20, top: 20, bottom: 30 }}>
                     <CartesianGrid strokeDasharray="3 3" />
-                    <XAxis dataKey="x" type="number" domain={['auto', 'auto']} />
-                    <YAxis dataKey="p" type="number" domain={[0, 1]} />
+                    <XAxis dataKey="x" type="number" domain={['auto', 'auto']} label={{ value: 'Portfolio Return', position: 'insideBottom', offset: -5 }} />
+                    <YAxis dataKey="p" type="number" domain={[0, 1]} label={{ value: 'Cumulative Probability', angle: -90, position: 'insideLeft', offset: 20 }} />
                     <Tooltip />
                     <Line type="monotone" dataKey="p" stroke="#6366f1" dot={false} />
                     <ReferenceLine x={1} stroke="red" label="Break-even" />
@@ -968,27 +1173,18 @@ export function MoonfireSimulator({ layout }: { layout?: 'split' }) {
               {sizeLoading ? (
                 <div className="py-8 text-center text-gray-500">Simulating...</div>
               ) : sizeAnalysis ? (
-                (() => {
-                  // Filter out invalid or non-finite sharpe values
-                  const validSharpeData = sizeAnalysis.filter(r => Number.isFinite(r.sharpe));
-                  if (!validSharpeData.length) {
-                    return <div className="py-8 text-center text-gray-500">No valid data to plot Sharpe Ratio.</div>;
-                  }
-                  return (
-                    <div className="mb-4" style={{ width: '100%', height: 260 }}>
-                      <ResponsiveContainer width="100%" height={260}>
-                        <LineChart data={validSharpeData}>
-                          <CartesianGrid strokeDasharray="3 3" />
-                          <XAxis dataKey="size" />
-                          <YAxis label={{ value: 'Sharpe Ratio', angle: -90, position: 'insideLeft' }} />
-                          <Tooltip />
-                          <Legend />
-                          <Line type="monotone" dataKey="sharpe" stroke="#10b981" name="Sharpe Ratio" />
-                        </LineChart>
-                      </ResponsiveContainer>
-                    </div>
-                  );
-                })()
+                <div className="mb-4" style={{ width: '100%', height: 340 }}>
+                  <ResponsiveContainer width="100%" height={340}>
+                    <LineChart data={sizeAnalysis} margin={{ left: 60, right: 20, top: 20, bottom: 30 }}>
+                      <CartesianGrid strokeDasharray="3 3" />
+                      <XAxis dataKey="size" label={{ value: 'Portfolio Size', position: 'insideBottom', offset: -5 }} />
+                      <YAxis label={{ value: 'Sharpe Ratio', angle: -90, position: 'insideLeft', offset: 20 }} />
+                      <Tooltip />
+                      <Legend />
+                      <Line type="monotone" dataKey="sharpe" stroke="#10b981" name="Sharpe Ratio" />
+                    </LineChart>
+                  </ResponsiveContainer>
+                </div>
               ) : (
                 <div className="py-8 text-center text-gray-500">Click the tab to run analysis.</div>
               )}
@@ -999,10 +1195,10 @@ export function MoonfireSimulator({ layout }: { layout?: 'split' }) {
               <h3 className="text-lg font-semibold mb-2">Portfolio Return Quantiles</h3>
               <div className="mb-4" style={{ width: '100%', height: 240 }}>
                 <ResponsiveContainer width="100%" height={240}>
-                  <BarChart data={quantileData}>
+                  <BarChart data={quantileData} margin={{ left: 60, right: 20, top: 20, bottom: 30 }}>
                     <CartesianGrid strokeDasharray="3 3" />
-                    <XAxis dataKey="q" />
-                    <YAxis />
+                    <XAxis dataKey="q" label={{ value: 'Quantile', position: 'insideBottom', offset: -5 }} />
+                    <YAxis label={{ value: 'Return', angle: -90, position: 'insideLeft', offset: 20 }} />
                     <Tooltip />
                     <Bar dataKey="value" fill="#a78bfa" />
                   </BarChart>
@@ -1149,12 +1345,12 @@ export function MoonfireSimulator({ layout }: { layout?: 'split' }) {
               {sizeLoading ? (
                 <div className="py-8 text-center text-gray-500">Simulating...</div>
               ) : sizeAnalysis ? (
-                <div className="mb-4" style={{ width: '100%', height: 260 }}>
-                  <ResponsiveContainer width="100%" height={260}>
-                    <LineChart data={probData}>
+                <div className="mb-4" style={{ width: '100%', height: 340 }}>
+                  <ResponsiveContainer width="100%" height={340}>
+                    <LineChart data={probData} margin={{ left: 60, right: 20, top: 20, bottom: 30 }}>
                       <CartesianGrid strokeDasharray="3 3" />
-                      <XAxis dataKey="size" />
-                      <YAxis label={{ value: 'Probability', angle: -90, position: 'insideLeft' }} domain={[0, 1]} />
+                      <XAxis dataKey="size" label={{ value: 'Portfolio Size', position: 'insideBottom', offset: -5 }} />
+                      <YAxis label={{ value: 'Probability', angle: -90, position: 'insideLeft', offset: 20 }} domain={[0, 1]} />
                       <Tooltip formatter={v => (v * 100).toFixed(1) + '%'} />
                       <Legend />
                       <Line type="monotone" dataKey="probLoss" stroke="#ef4444" name="Prob(Loss)" />
