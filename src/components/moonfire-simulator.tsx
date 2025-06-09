@@ -3,7 +3,7 @@ import { Card } from './ui/card';
 import { Button } from './ui/button';
 import { Input } from './ui/input';
 import { BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Line, ReferenceLine, Legend, ComposedChart, Area, LineChart } from 'recharts';
-import { Share2, AlertTriangle, BarChart2, TrendingUp, Sigma, Hash, ArrowDownCircle, PercentCircle, Copy, Info } from 'lucide-react';
+import { Share2, AlertTriangle, BarChart2, TrendingUp, Sigma, Hash, ArrowDownCircle, PercentCircle, Copy, Info, Search } from 'lucide-react';
 import { toast } from 'sonner';
 import chroma from 'chroma-js';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from './ui/dialog';
@@ -226,6 +226,10 @@ export function MoonfireSimulator({ layout }: { layout?: 'split' }) {
   const [showMean, setShowMean] = useState(true);
   const [showMedian, setShowMedian] = useState(true);
   const [showBreakEven, setShowBreakEven] = useState(true);
+  // Add state for interactive legend highlight
+  const [highlightedSize, setHighlightedSize] = useState<number | null>(null);
+  const chartRef = useRef<any>(null);
+  const [batchSimIndex, setBatchSimIndex] = useState(0); // For batch overview navigation
 
   // Sync input fields to results or histXMin/Max when results change
   useEffect(() => {
@@ -364,9 +368,18 @@ export function MoonfireSimulator({ layout }: { layout?: 'split' }) {
     }
   };
 
-  const DENSITY_COLORS = ['#6366f1', '#f59e42', '#10b981', '#ef4444', '#a78bfa', '#fbbf24'];
+  const DENSITY_COLORS = [
+    '#6366f1', // indigo
+    '#f59e42', // orange
+    '#10b981', // green
+    '#ef4444', // red
+    '#a78bfa', // purple
+    '#fbbf24', // yellow
+    '#0ea5e9', // blue
+    '#f472b6', // pink
+  ];
 
-  function computeKDE(data: number[], steps = 100) {
+  function computeKDE(data: number[], steps = 200) {
     if (!data.length) return [];
     const sorted = [...data].sort((a, b) => a - b);
     const min = sorted[0];
@@ -524,10 +537,10 @@ export function MoonfireSimulator({ layout }: { layout?: 'split' }) {
                     <button className={`px-3 py-1 rounded ${tab === 'cdf' ? 'bg-blue-600 text-white' : 'bg-gray-100'}`} onClick={() => setTab('cdf')}>CDF</button>
                     <button className={`px-3 py-1 rounded ${tab === 'sharpe' ? 'bg-blue-600 text-white' : 'bg-gray-100'}`} onClick={() => { setTab('sharpe'); if (!sizeAnalysis && !sizeLoading) handleSizeAnalysis(); }}>Risk-Adjusted Performance</button>
                     <button className={`px-3 py-1 rounded ${tab === 'quant' ? 'bg-blue-600 text-white' : 'bg-gray-100'}`} onClick={() => setTab('quant')}>Quantiles</button>
-                    <button className={`px-3 py-1 rounded ${tab === 'heat' ? 'bg-blue-600 text-white' : 'bg-gray-100'}`} onClick={() => setTab('heat')}>Investment Heatmap</button>
                     <button className={`px-3 py-1 rounded ${tab === 'size' ? 'bg-blue-600 text-white' : 'bg-gray-100'}`} onClick={() => { setTab('size'); if (!sizeAnalysis && !sizeLoading) handleSizeAnalysis(); }}>Portfolio Size Analysis</button>
                     <button className={`px-3 py-1 rounded ${tab === 'violin' ? 'bg-blue-600 text-white' : 'bg-gray-100'}`} onClick={() => { setTab('violin'); if (!sizeAnalysis && !sizeLoading) handleSizeAnalysis(); }}>Return Distribution by Size</button>
                     <button className={`px-3 py-1 rounded ${tab === 'prob' ? 'bg-blue-600 text-white' : 'bg-gray-100'}`} onClick={() => { setTab('prob'); if (!sizeAnalysis && !sizeLoading) handleSizeAnalysis(); }}>Return Probabilities</button>
+                    <button className={`px-3 py-1 rounded ${tab === 'batch' ? 'bg-blue-600 text-white' : 'bg-gray-100'}`} onClick={() => setTab('batch')}>Investment Batch Overview</button>
                   </div>
                   {tab === 'hist' && (
                     <>
@@ -585,7 +598,7 @@ export function MoonfireSimulator({ layout }: { layout?: 'split' }) {
                           >Reset</button>
                         </div>
                       )}
-                      <div className="mb-4" style={{ width: '100%', height: 240 }}>
+                      <div className="mb-1" style={{ width: '100%', height: 240 }}>
                         <ResponsiveContainer width="100%" height={240}>
                           <BarChart data={histData} margin={{ left: 80, right: 20, top: 20, bottom: 40 }}>
                             <CartesianGrid strokeDasharray="3 3" />
@@ -593,11 +606,11 @@ export function MoonfireSimulator({ layout }: { layout?: 'split' }) {
                               dataKey="binStart"
                               type="number"
                               domain={[(histXMin !== null ? histXMin : results?.minReturn) || 0, (histXMax !== null ? histXMax : results?.maxReturn) || 1]}
-                              label={{ value: 'Portfolio Return', position: 'bottom', offset: 20 }}
+                              // label={{ value: 'Portfolio Return', position: 'bottom', offset: 20 }}
                               tickFormatter={v => v.toFixed(2)}
                               allowDataOverflow={true}
                             />
-                            <YAxis label={{ value: 'Count', angle: -90, position: 'left', offset: 40 }} />
+                            <YAxis /*label={{ value: 'Count', angle: -90, position: 'left', offset: 40 }}*/ />
                             <Tooltip labelFormatter={(_, i) => histData[i]?.bin || ''} />
                             <Bar dataKey="count" fill="#60a5fa" name="Count" />
                             {showMean && <ReferenceLine x={results.mean} stroke="green" label="Mean" />}
@@ -606,39 +619,42 @@ export function MoonfireSimulator({ layout }: { layout?: 'split' }) {
                           </BarChart>
                         </ResponsiveContainer>
                       </div>
+                      <div className="text-xs text-gray-500 mb-4">X: Portfolio Return, Y: Count</div>
                     </>
                   )}
                   {tab === 'loghist' && (
                     <>
                       <h3 className="text-lg font-semibold mb-2">Log-Scale Portfolio Return Distribution</h3>
-                      <div className="mb-4" style={{ width: '100%', height: 240 }}>
+                      <div className="mb-1" style={{ width: '100%', height: 240 }}>
                         <ResponsiveContainer width="100%" height={240}>
                           <BarChart data={logHistData} margin={{ left: 60, right: 20, top: 20, bottom: 30 }}>
                             <CartesianGrid strokeDasharray="3 3" />
-                            <XAxis dataKey="bin" interval={4} angle={-30} textAnchor="end" height={60} label={{ value: 'Log Portfolio Return', position: 'insideBottom', offset: -5 }} />
-                            <YAxis label={{ value: 'Count', angle: -90, position: 'insideLeft', offset: 20 }} />
+                            <XAxis dataKey="bin" interval={4} angle={-30} textAnchor="end" height={60} /*label={{ value: 'Log Portfolio Return', position: 'insideBottom', offset: -5 }}*/ />
+                            <YAxis /*label={{ value: 'Count', angle: -90, position: 'insideLeft', offset: 20 }}*/ />
                             <Tooltip />
                             <Bar dataKey="count" fill="#fbbf24" />
                           </BarChart>
                         </ResponsiveContainer>
                       </div>
+                      <div className="text-xs text-gray-500 mb-4">X: Log Portfolio Return, Y: Count</div>
                     </>
                   )}
                   {tab === 'cdf' && (
                     <>
                       <h3 className="text-lg font-semibold mb-2">Cumulative Distribution Function (CDF)</h3>
-                      <div className="mb-4" style={{ width: '100%', height: 240 }}>
+                      <div className="mb-1" style={{ width: '100%', height: 240 }}>
                         <ResponsiveContainer width="100%" height={240}>
                           <ComposedChart data={cdfData} margin={{ left: 60, right: 20, top: 20, bottom: 30 }}>
                             <CartesianGrid strokeDasharray="3 3" />
-                            <XAxis dataKey="x" type="number" domain={['auto', 'auto']} label={{ value: 'Portfolio Return', position: 'insideBottom', offset: -5 }} />
-                            <YAxis dataKey="p" type="number" domain={[0, 1]} label={{ value: 'Cumulative Probability', angle: -90, position: 'insideLeft', offset: 20 }} />
+                            <XAxis dataKey="x" type="number" domain={['auto', 'auto']} /*label={{ value: 'Portfolio Return', position: 'insideBottom', offset: -5 }}*/ />
+                            <YAxis dataKey="p" type="number" domain={[0, 1]} /*label={{ value: 'Cumulative Probability', angle: -90, position: 'insideLeft', offset: 20 }}*/ />
                             <Tooltip />
                             <Line type="monotone" dataKey="p" stroke="#6366f1" dot={false} />
                             <ReferenceLine x={1} stroke="red" label="Break-even" />
                           </ComposedChart>
                         </ResponsiveContainer>
                       </div>
+                      <div className="text-xs text-gray-500 mb-4">X: Portfolio Return, Y: Cumulative Probability</div>
                     </>
                   )}
                   {tab === 'sharpe' && (
@@ -647,18 +663,21 @@ export function MoonfireSimulator({ layout }: { layout?: 'split' }) {
                       {sizeLoading ? (
                         <div className="py-8 text-center text-gray-500">Simulating...</div>
                       ) : sizeAnalysis ? (
-                        <div className="mb-4" style={{ width: '100%', height: 340 }}>
+                        <>
+                          <div className="mb-1" style={{ width: '100%', height: 340 }}>
                           <ResponsiveContainer width="100%" height={340}>
                             <LineChart data={sizeAnalysis} margin={{ left: 60, right: 20, top: 20, bottom: 30 }}>
                               <CartesianGrid strokeDasharray="3 3" />
-                              <XAxis dataKey="size" label={{ value: 'Portfolio Size', position: 'insideBottom', offset: -5 }} />
-                              <YAxis label={{ value: 'Sharpe Ratio', angle: -90, position: 'insideLeft', offset: 20 }} />
+                                <XAxis dataKey="size" /*label={{ value: 'Portfolio Size', position: 'insideBottom', offset: -5 }}*/ />
+                                <YAxis /*label={{ value: 'Sharpe Ratio', angle: -90, position: 'insideLeft', offset: 20 }}*/ />
                               <Tooltip />
                               <Legend />
                               <Line type="monotone" dataKey="sharpe" stroke="#10b981" name="Sharpe Ratio" />
                             </LineChart>
                           </ResponsiveContainer>
                         </div>
+                          <div className="text-xs text-gray-500 mb-4">X: Portfolio Size, Y: Sharpe Ratio</div>
+                        </>
                       ) : (
                         <div className="py-8 text-center text-gray-500">Click the tab to run analysis.</div>
                       )}
@@ -667,51 +686,18 @@ export function MoonfireSimulator({ layout }: { layout?: 'split' }) {
                   {tab === 'quant' && (
                     <>
                       <h3 className="text-lg font-semibold mb-2">Portfolio Return Quantiles</h3>
-                      <div className="mb-4" style={{ width: '100%', height: 240 }}>
+                      <div className="mb-1" style={{ width: '100%', height: 240 }}>
                         <ResponsiveContainer width="100%" height={240}>
                           <BarChart data={quantileData} margin={{ left: 60, right: 20, top: 20, bottom: 30 }}>
                             <CartesianGrid strokeDasharray="3 3" />
-                            <XAxis dataKey="q" label={{ value: 'Quantile', position: 'insideBottom', offset: -5 }} />
-                            <YAxis label={{ value: 'Return', angle: -90, position: 'insideLeft', offset: 20 }} />
+                            <XAxis dataKey="q" /*label={{ value: 'Quantile', position: 'insideBottom', offset: -5 }}*/ />
+                            <YAxis /*label={{ value: 'Return', angle: -90, position: 'insideLeft', offset: 20 }}*/ />
                             <Tooltip />
                             <Bar dataKey="value" fill="#a78bfa" />
                           </BarChart>
                         </ResponsiveContainer>
                       </div>
-                    </>
-                  )}
-                  {tab === 'heat' && (
-                    <>
-                      <h3 className="text-lg font-semibold mb-2">Investment Returns Heatmap (First 50 Simulations)</h3>
-                      <div className="mb-4 flex flex-col items-center">
-                        {heatmapData && heatmapData.length > 0 ? (
-                          <svg width={Math.max(600, 8 * nInvestments)} height={16 * nSimulationsHeatmap + 40} style={{ background: '#fff', borderRadius: 8, border: '1px solid #eee' }}>
-                            {/* Color grid */}
-                            {heatmapData.map((row, i) =>
-                              row.map((val, j) => {
-                                // Viridis colormap using chroma-js
-                                const color = chroma.scale('viridis').domain([heatmapStats.min, heatmapStats.max])(val).hex();
-                                return <rect key={i + '-' + j} x={j * 8} y={i * 16} width={8} height={16} fill={color} />;
-                              })
-                            )}
-                            {/* Axes labels */}
-                            <text x={8} y={16 * nSimulationsHeatmap + 20} fontSize={12} fill="#444">Investment Index →</text>
-                            <text x={-60} y={16 * nSimulationsHeatmap / 2} fontSize={12} fill="#444" transform={`rotate(-90 0,${16 * nSimulationsHeatmap / 2})`}>Simulation Number ↓</text>
-                          </svg>
-                        ) : (
-                          <div className="py-8 text-center text-gray-500">No data to display heatmap.</div>
-                        )}
-                        {/* Stats box */}
-                        {heatmapStats && (
-                          <div className="mt-4 p-2 bg-white border rounded shadow text-xs font-mono text-left" style={{ minWidth: 220 }}>
-                            <div><b>Statistics:</b></div>
-                            <div>Mean: {heatmapStats.mean.toFixed(4)}x</div>
-                            <div>Max: {heatmapStats.max.toFixed(2)}x</div>
-                            <div>Min: {heatmapStats.min.toFixed(4)}x</div>
-                            <div>Std: {heatmapStats.std.toFixed(4)}</div>
-                          </div>
-                        )}
-                      </div>
+                      <div className="text-xs text-gray-500 mb-4">X: Quantile, Y: Return</div>
                     </>
                   )}
                   {tab === 'size' && (
@@ -720,13 +706,14 @@ export function MoonfireSimulator({ layout }: { layout?: 'split' }) {
                       {sizeLoading ? (
                         <div className="py-8 text-center text-gray-500">Simulating...</div>
                       ) : sizeAnalysis ? (
-                        <div className="mb-4" style={{ width: '100%', height: 260 }}>
+                        <>
+                          <div className="mb-1" style={{ width: '100%', height: 260 }}>
                           <ResponsiveContainer width="100%" height={260}>
                             <ComposedChart data={meanStdData}>
                               <CartesianGrid strokeDasharray="3 3" />
                               <XAxis dataKey="size" />
-                              <YAxis yAxisId="left" label={{ value: 'Mean', angle: -90, position: 'insideLeft' }} />
-                              <YAxis yAxisId="right" orientation="right" label={{ value: 'Std Dev', angle: 90, position: 'insideRight' }} />
+                                <YAxis yAxisId="left" /*label={{ value: 'Mean', angle: -90, position: 'insideLeft' }}*/ />
+                                <YAxis yAxisId="right" orientation="right" /*label={{ value: 'Std Dev', angle: 90, position: 'insideRight' }}*/ />
                               <Tooltip />
                               <Legend />
                               <Line yAxisId="left" type="monotone" dataKey="mean" stroke="#2563eb" name="Mean" />
@@ -734,6 +721,8 @@ export function MoonfireSimulator({ layout }: { layout?: 'split' }) {
                             </ComposedChart>
                           </ResponsiveContainer>
                         </div>
+                          <div className="text-xs text-gray-500 mb-4">X: Portfolio Size, Y (left): Mean, Y (right): Std Dev</div>
+                        </>
                       ) : (
                         <div className="py-8 text-center text-gray-500">Click the tab to run analysis.</div>
                       )}
@@ -745,68 +734,50 @@ export function MoonfireSimulator({ layout }: { layout?: 'split' }) {
                       {sizeLoading ? (
                         <div className="py-8 text-center text-gray-500">Simulating...</div>
                       ) : sizeAnalysis ? (
-                        <div className="mb-4 flex flex-col items-center">
-                          <svg width={480} height={260} style={{ background: '#f9fafb', borderRadius: 8, border: '1px solid #eee' }}>
-                            {/* Axes */}
-                            <line x1={40} x2={40} y1={20} y2={220} stroke="#888" strokeWidth={1} />
-                            <line x1={40} x2={440} y1={220} y2={220} stroke="#888" strokeWidth={1} />
-                            {/* Densities */}
-                            {violinData.map((d, idx) => {
-                              const kde = computeKDE(d.returns, 100);
-                              if (!kde.length) return null;
-                              const minX = Math.min(...kde.map(p => p.x));
-                              const maxX = Math.max(...kde.map(p => p.x));
-                              const maxY = Math.max(...kde.map(p => p.y));
-                              // Scales
-                              const x = (v: number) => 40 + ((v - minX) / (maxX - minX + 1e-8)) * 400;
-                              const y = (v: number) => 220 - (v / (maxY + 1e-8)) * 180;
-                              // Path
-                              const path = kde.map((p, i) => `${i === 0 ? 'M' : 'L'}${x(p.x)},${y(p.y)}`).join(' ');
-                              return (
-                                <path key={d.size} d={path} fill="none" stroke={DENSITY_COLORS[idx % DENSITY_COLORS.length]} strokeWidth={3} />
-                              );
-                            })}
-                            {/* X axis ticks/labels */}
-                            {Array.from({ length: 6 }, (_, i) => {
-                              const v = i / 5;
-                              const min = Math.min(...violinData.flatMap(d => d.returns));
-                              const max = Math.max(...violinData.flatMap(d => d.returns));
-                              const val = min + v * (max - min);
-                              return (
-                                <g key={i}>
-                                  <line x1={40 + v * 400} x2={40 + v * 400} y1={220} y2={225} stroke="#888" />
-                                  <text x={40 + v * 400} y={238} fontSize={11} textAnchor="middle" fill="#444">{val.toFixed(2)}</text>
-                                </g>
-                              );
-                            })}
-                            {/* Y axis ticks/labels */}
-                            {Array.from({ length: 5 }, (_, i) => {
-                              const v = i / 4;
-                              const maxY = Math.max(...violinData.map(d => {
-                                const kde = computeKDE(d.returns, 100);
-                                return Math.max(...kde.map(p => p.y));
-                              }));
-                              const val = v * maxY;
-                              return (
-                                <g key={i}>
-                                  <line x1={35} x2={40} y1={220 - v * 180} y2={220 - v * 180} stroke="#888" />
-                                  <text x={28} y={224 - v * 180} fontSize={11} textAnchor="end" fill="#444">{val.toFixed(2)}</text>
-                                </g>
-                              );
-                            })}
-                            {/* Axis labels */}
-                            <text x={240} y={255} textAnchor="middle" fontSize={13} fill="#444">Return</text>
-                            <text x={10} y={120} textAnchor="middle" fontSize={13} fill="#444" transform="rotate(-90 10,120)">Density</text>
-                          </svg>
-                          {/* Legend */}
-                          <div className="flex gap-4 mt-2">
-                            {violinData.map((d, idx) => (
-                              <div key={d.size} className="flex items-center gap-1">
-                                <span style={{ width: 16, height: 4, background: DENSITY_COLORS[idx % DENSITY_COLORS.length], display: 'inline-block', borderRadius: 2 }}></span>
-                                <span className="text-xs text-gray-700">Size {d.size}</span>
+                        <div className="mb-1 flex flex-col items-center gap-8">
+                          {/* Render one chart per portfolio size */}
+                          {violinData.map((d, idx) => {
+                            const kde = computeKDE(d.returns, 200);
+                            // Find x domain where density > 0.01
+                            let minX = Infinity, maxX = -Infinity;
+                            kde.forEach(pt => {
+                              if (pt.y > 0.01) {
+                                if (pt.x < minX) minX = pt.x;
+                                if (pt.x > maxX) maxX = pt.x;
+                              }
+                            });
+                            const range = maxX - minX;
+                            minX = Math.max(0, minX - range * 0.05);
+                            maxX = maxX + range * 0.05;
+                            if (!isFinite(minX) || !isFinite(maxX) || minX >= maxX) {
+                              minX = 0;
+                              maxX = 1.5;
+                            }
+                            return (
+                              <div key={d.size} className="w-full">
+                                <div className="text-sm font-semibold mb-1">Portfolio Size: {d.size}</div>
+                                <ResponsiveContainer width="100%" height={180}>
+                                  <LineChart data={kde} margin={{ left: 40, right: 20, top: 20, bottom: 20 }}>
+                                    <CartesianGrid strokeDasharray="3 3" />
+                                    <XAxis type="number" dataKey="x" domain={[minX, maxX]} />
+                                    <YAxis type="number" />
+                                    <Tooltip formatter={(v: number) => v.toFixed(4)} labelFormatter={(v: number) => v.toFixed(3)} />
+                                    <Line
+                                      dataKey="y"
+                                      stroke={DENSITY_COLORS[idx % DENSITY_COLORS.length]}
+                                      dot={false}
+                                      isAnimationActive={false}
+                                      type="monotone"
+                                      strokeWidth={2.5}
+                                      activeDot={{ r: 5 }}
+                                    />
+                                    <ReferenceLine x={1} stroke="#ef4444" strokeDasharray="4 2" strokeWidth={2} label={{ value: 'Break-even', position: 'top', fill: '#ef4444', fontSize: 12 }} />
+                                  </LineChart>
+                                </ResponsiveContainer>
                               </div>
-                            ))}
-                          </div>
+                            );
+                          })}
+                          <div className="text-xs text-gray-500 mt-2 mb-4">X: Return, Y: Density</div>
                         </div>
                       ) : (
                         <div className="py-8 text-center text-gray-500">Click the tab to run analysis.</div>
@@ -819,13 +790,14 @@ export function MoonfireSimulator({ layout }: { layout?: 'split' }) {
                       {sizeLoading ? (
                         <div className="py-8 text-center text-gray-500">Simulating...</div>
                       ) : sizeAnalysis ? (
-                        <div className="mb-4" style={{ width: '100%', height: 340 }}>
+                        <>
+                          <div className="mb-1" style={{ width: '100%', height: 340 }}>
                           <ResponsiveContainer width="100%" height={340}>
                             <LineChart data={probData} margin={{ left: 60, right: 20, top: 20, bottom: 30 }}>
                               <CartesianGrid strokeDasharray="3 3" />
-                              <XAxis dataKey="size" label={{ value: 'Portfolio Size', position: 'insideBottom', offset: -5 }} />
-                              <YAxis label={{ value: 'Probability', angle: -90, position: 'insideLeft', offset: 20 }} domain={[0, 1]} />
-                              <Tooltip formatter={v => (v * 100).toFixed(1) + '%'} />
+                                <XAxis dataKey="size" /*label={{ value: 'Portfolio Size', position: 'insideBottom', offset: -5 }}*/ />
+                                <YAxis /*label={{ value: 'Probability', angle: -90, position: 'insideLeft', offset: 20 }}*/ domain={[0, 1]} />
+                                <Tooltip formatter={v => (typeof v === 'number' ? (v * 100).toFixed(1) + '%' : v)} />
                               <Legend />
                               <Line type="monotone" dataKey="probLoss" stroke="#ef4444" name="Prob(Loss)" />
                               <Line type="monotone" dataKey="prob2x" stroke="#10b981" name="Prob(2x+)" />
@@ -833,10 +805,164 @@ export function MoonfireSimulator({ layout }: { layout?: 'split' }) {
                             </LineChart>
                           </ResponsiveContainer>
                         </div>
+                          <div className="text-xs text-gray-500 mb-4">X: Portfolio Size, Y: Probability</div>
+                        </>
                       ) : (
                         <div className="py-8 text-center text-gray-500">Click the tab to run analysis.</div>
                       )}
                     </>
+                  )}
+                  {tab === 'batch' && results && results.allInvestmentReturns && results.allInvestmentReturns.length > 0 && (
+                    (() => {
+                      // Use batchSimIndex for navigation
+                      const nSims = results.allInvestmentReturns.length;
+                      const investment_returns = results.allInvestmentReturns[batchSimIndex] as number[];
+                      const n_investments = investment_returns.length;
+                      const per_investment_value = 1.0 / n_investments;
+                      // Performance tiers
+                      const points = investment_returns.map((ret: number, i: number) => {
+                        let tier = 'Loss', color = '#ef4444';
+                        if (ret < per_investment_value) {
+                          tier = 'Loss'; color = '#ef4444';
+                        } else if (ret < 1.5 * per_investment_value) {
+                          tier = 'Break-even'; color = '#f59e42';
+                        } else if (ret < 3 * per_investment_value) {
+                          tier = 'Modest'; color = '#fbbf24';
+                        } else if (ret < 10 * per_investment_value) {
+                          tier = 'Good'; color = '#10b981';
+                        } else {
+                          tier = 'Excellent'; color = '#166534';
+                        }
+                        // Size: log scale for better visualization
+                        const size = 20 + 100 * Math.log10(Math.max(ret, 0.001) / per_investment_value + 1);
+                        return { i, ret, tier, color, size };
+                      });
+                      // Reference lines
+                      const refLines = [per_investment_value, 2 * per_investment_value, 5 * per_investment_value];
+                      const refLineMeta = [
+                        { color: '#ef4444', label: 'Break-even (1x)' },
+                        { color: '#2563eb', label: '2x return' },
+                        { color: '#22c55e', label: '5x return' },
+                      ];
+                      // Y scale: log if needed
+                      const max_return = Math.max(...investment_returns);
+                      const min_return = Math.min(...investment_returns.filter((x: number) => x > 0)) || 0.001;
+                      const useLog = max_return / min_return > 100;
+                      // Stats
+                      const winners = investment_returns.filter((x: number) => x >= per_investment_value).length;
+                      const losers = investment_returns.filter((x: number) => x < per_investment_value).length;
+                      const top_return = Math.max(...investment_returns) / per_investment_value;
+                      const avg_return = investment_returns.reduce((a: number, b: number) => a + b, 0) / n_investments / per_investment_value;
+                      const total_portfolio = investment_returns.reduce((a: number, b: number) => a + b, 0);
+                      // SVG layout
+                      const svgWidth = 750;
+                      const svgHeight = 420;
+                      const leftPad = 60;
+                      const rightPad = 28;
+                      const topPad = 28;
+                      const bottomPad = 56;
+                      const plotWidth = svgWidth - leftPad - rightPad;
+                      const plotHeight = svgHeight - topPad - bottomPad;
+                      // X scale: fit all investments in plotWidth
+                      const getX = (idx: number) => leftPad + (plotWidth * idx) / (n_investments - 1 || 1);
+                      // Y scale
+                      const getY = (ret: number) => {
+                        if (useLog) {
+                          return topPad + plotHeight - plotHeight * (Math.log10(ret) - Math.log10(min_return)) / (Math.log10(max_return) - Math.log10(min_return));
+                        } else {
+                          return topPad + plotHeight - plotHeight * (ret - min_return) / (max_return - min_return);
+                        }
+                      };
+                      return (
+                        <div className="mb-1 flex flex-col items-center w-full">
+                          {/* Navigation arrows */}
+                          <div className="flex items-center gap-2 mb-2">
+                            <button
+                              className="px-2 py-1 rounded bg-gray-100 border border-gray-300 hover:bg-gray-200 text-gray-700 disabled:opacity-50"
+                              onClick={() => setBatchSimIndex(i => Math.max(0, i - 1))}
+                              disabled={batchSimIndex === 0}
+                              aria-label="Previous simulation"
+                            >
+                              &#8592;
+                            </button>
+                            <span className="text-sm font-semibold">Simulation #{batchSimIndex + 1} of {nSims}</span>
+                            <button
+                              className="px-2 py-1 rounded bg-gray-100 border border-gray-300 hover:bg-gray-200 text-gray-700 disabled:opacity-50"
+                              onClick={() => setBatchSimIndex(i => Math.min(nSims - 1, i + 1))}
+                              disabled={batchSimIndex === nSims - 1}
+                              aria-label="Next simulation"
+                            >
+                              &#8594;
+                            </button>
+                          </div>
+                          <h3 className="text-lg font-semibold mb-2">Investment Batch Overview (Simulation #{batchSimIndex + 1})</h3>
+                          <div style={{ width: svgWidth, overflowX: 'auto' }}>
+                            <svg width={svgWidth} height={svgHeight} style={{ background: '#fff', borderRadius: 8, border: '1px solid #eee', display: 'block' }}>
+                              {/* Points */}
+                              {points.map((pt: { i: number; ret: number; tier: string; color: string; size: number }, idx: number) => {
+                                const x = getX(idx);
+                                const y = getY(pt.ret);
+                                return (
+                                  <circle
+                                    key={idx}
+                                    cx={x}
+                                    cy={y}
+                                    r={pt.size / 20}
+                                    fill={pt.color}
+                                    stroke="#222"
+                                    strokeWidth={0.5}
+                                    opacity={0.7}
+                                  >
+                                    <title>
+                                      {`Investment #${idx + 1}\nReturn: ${pt.ret.toFixed(4)}\nTier: ${pt.tier}`}
+                                    </title>
+                                  </circle>
+                                );
+                              })}
+                              {/* Axes */}
+                              <line x1={leftPad} x2={leftPad} y1={topPad} y2={svgHeight - bottomPad} stroke="#222" strokeWidth={1.5} />
+                              <line x1={leftPad} x2={svgWidth - rightPad} y1={svgHeight - bottomPad} y2={svgHeight - bottomPad} stroke="#222" strokeWidth={1.5} />
+                              {/* X ticks */}
+                              {[0, Math.floor(n_investments / 2), n_investments - 1].map((i: number) => {
+                                const x = getX(i);
+                                return (
+                                  <g key={i}>
+                                    <line x1={x} x2={x} y1={svgHeight - bottomPad} y2={svgHeight - bottomPad + 8} stroke="#222" />
+                                    <text x={x} y={svgHeight - bottomPad + 22} fontSize={12} textAnchor="middle">{i + 1}</text>
+                                  </g>
+                                );
+                              })}
+                              {/* Y ticks */}
+                              {(useLog
+                                ? [min_return, per_investment_value, 2 * per_investment_value, 5 * per_investment_value, max_return]
+                                : [min_return, per_investment_value, 2 * per_investment_value, 5 * per_investment_value, max_return]
+                              ).map((y: number, i: number) => {
+                                const yPos = getY(y);
+                                return (
+                                  <g key={i}>
+                                    <line x1={leftPad - 5} x2={leftPad} y1={yPos} y2={yPos} stroke="#222" />
+                                    <text x={leftPad - 10} y={yPos + 4} fontSize={12} textAnchor="end">{y.toFixed(2)}</text>
+                                  </g>
+                                );
+                              })}
+                              {/* Axis labels */}
+                              <text x={leftPad + plotWidth / 2} y={svgHeight - 18} fontSize={14} textAnchor="middle" fontWeight="bold">Investment Index</text>
+                              <text x={18} y={topPad + plotHeight / 2} fontSize={14} textAnchor="middle" fontWeight="bold" transform={`rotate(-90 18,${topPad + plotHeight / 2})`}>{useLog ? 'Return Value (log scale)' : 'Return Value'}</text>
+                            </svg>
+                          </div>
+                          {/* Summary statistics box */}
+                          <div className="mt-4 p-2 bg-white border rounded shadow text-xs font-mono text-left" style={{ minWidth: 220 }}>
+                            <div><b>Summary Statistics:</b></div>
+                            <div>Winners: {winners} ({((winners / n_investments) * 100).toFixed(1)}%)</div>
+                            <div>Losers: {losers} ({((losers / n_investments) * 100).toFixed(1)}%)</div>
+                            <div>Top Return: {top_return.toFixed(1)}x</div>
+                            <div>Avg Return: {avg_return.toFixed(2)}x</div>
+                            <div>Total Portfolio: {total_portfolio.toFixed(2)}x initial</div>
+                          </div>
+                          <div className="text-xs text-gray-500 mt-2 mb-4">X: Investment Index, Y: Return Value</div>
+                        </div>
+                      );
+                    })()
                   )}
                   {/* Summary stats table (always visible) */}
                   <div className="mt-6 bg-gray-50 rounded-lg shadow-sm p-4 flex flex-col gap-2">
@@ -890,44 +1016,115 @@ export function MoonfireSimulator({ layout }: { layout?: 'split' }) {
                 </DialogHeader>
                 <div className="max-h-[60vh] overflow-y-auto p-6">
                   <div className="prose max-w-none text-sm">
-                    <h3 className="text-blue-700 text-lg font-bold mt-0 mb-2">Overview</h3>
-                    <p className="mb-6">This simulation models the returns of a portfolio of investments drawn from a bounded Pareto (power-law) distribution, which is often used to describe venture capital and startup outcomes. The simulation helps visualize the impact of power-law dynamics on portfolio returns, quantiles, and probabilities of large outcomes.</p>
-                    <h3 className="text-blue-700 text-lg font-bold mb-2">Simulation Steps</h3>
-                    <ol className="list-decimal pl-6 mb-6">
-                      <li><b>Draw Returns:</b> For each simulation, sample <InlineMath math={"N"} /> investments from a bounded Pareto distribution with parameters <InlineMath math={"\\alpha"} />, <InlineMath math={"x_{min}"} />, and <InlineMath math={"x_{max}"} />.</li>
-                      <li><b>Bounded Pareto Distribution:</b> Each investment return <InlineMath math={"X"} /> is drawn from:
-                        <BlockMath math={"P(X > x) = (x_{min}/x)^{\\alpha},\\ x_{min} \\leq x \\leq x_{max}"} />
-                      </li>
-                      <li><b>Portfolio Return:</b> The total portfolio return is the sum of all investment returns:
-                        <BlockMath math={"R_{portfolio} = \\sum_{i=1}^N X_i"} />
-                      </li>
-                      <li><b>Repeat:</b> Repeat the above steps for the specified number of simulations to build a distribution of portfolio outcomes.</li>
-                      <li><b>Statistics:</b> Compute mean, median, standard deviation, quantiles, and probabilities (e.g., probability of loss, 2x, 5x, 10x returns).</li>
+                    <h3 className="text-blue-700 text-lg font-bold mt-0">The Portfolio Simulator</h3>
+                    <p>The Portfolio Simulator models venture capital investment returns using Monte Carlo simulation based on empirically-observed power-law distributions. This approach reflects the fundamental asymmetry of startup outcomes, where most investments underperform while a small fraction generate outsized returns.</p>
+                    <h3 className="text-blue-700 text-lg font-bold mb-2">Mathematical Foundation</h3>
+                    <h4 className="font-semibold mt-4 mb-1">Bounded Pareto Distribution</h4>
+                    <p>Investment returns follow a bounded Pareto distribution with probability density function:</p>
+                    <BlockMath math={String.raw`f(x) = \frac{\alpha C}{x^{\alpha + 1}} \quad \text{for } x_{\min} \leq x \leq x_{\max}`}/>
+                    <ul>
+                      <li><InlineMath math={String.raw`\alpha > 1`} /> is the shape parameter (power-law exponent)</li>
+                      <li><InlineMath math={String.raw`x_{\min}`} /> is the minimum return multiple (downside protection)</li>
+                      <li><InlineMath math={String.raw`x_{\max}`} /> is the maximum return multiple (upside cap)</li>
+                      <li><InlineMath math={String.raw`C`} /> is the normalization constant</li>
+                    </ul>
+                    <h4 className="font-semibold mt-4 mb-1">Normalization Constant</h4>
+                    <p>The normalization constant ensures the PDF integrates to 1:</p>
+                    <BlockMath math={String.raw`C = \begin{cases}
+\frac{\alpha - 1}{x_{\min}^{1-\alpha} - x_{\max}^{1-\alpha}} & \text{if } \alpha \neq 1 \\
+\frac{1}{\ln(x_{\max}/x_{\min})} & \text{if } \alpha = 1
+\end{cases}`}/>
+                    <h4 className="font-semibold mt-4 mb-1">Inverse Transform Sampling</h4>
+                    <p>Random samples are generated using the inverse CDF method:</p>
+                    <BlockMath math={String.raw`X = F^{-1}(U) = \begin{cases}
+\left(x_{\min}^{1-\alpha} - U(x_{\min}^{1-\alpha} - x_{\max}^{1-\alpha})\right)^{\frac{1}{1-\alpha}} & \text{if } \alpha \neq 1 \\
+x_{\min} \left(\frac{x_{\max}}{x_{\min}}\right)^U & \text{if } \alpha = 1
+\end{cases}`}/>
+                    <p>where <InlineMath math={String.raw`U \sim \text{Uniform}(0,1)`} />.</p>
+                    <h3 className="text-blue-700 text-lg font-bold mb-2">Model Parameters</h3>
+                    <h4 className="font-semibold mt-4 mb-1">Default Configuration</h4>
+                    <BlockMath math={String.raw`
+\begin{align}
+\alpha &= 2.05 \quad \text{(Ultra-heavy tail distribution)} \\
+x_{\min} &= 0.35 \quad \text{(Minimum 35\% recovery)} \\
+x_{\max} &= 1000 \quad \text{(Maximum 1000x return)} \\
+n &= 100 \quad \text{(Portfolio size)}
+\end{align}`}/>
+                    <h4 className="font-semibold mt-4 mb-1">Parameter Interpretation</h4>
+                    <b>Downside Protection (<InlineMath math={String.raw`x_{\min}`} />):</b>
+                    <ul>
+                      <li>Represents realistic asset recovery in startup failures</li>
+                      <li>Accounts for IP value, equipment liquidation, and acqui-hires</li>
+                      <li>Based on empirical VC liquidation data</li>
+                    </ul>
+                    <b>Upside Potential (<InlineMath math={String.raw`x_{\max}`} />):</b>
+                    <ul>
+                      <li>Caps extreme outlier scenarios for mathematical stability</li>
+                      <li>Reflects historical maximum returns in venture capital</li>
+                      <li>Prevents infinite tail behavior in simulations</li>
+                    </ul>
+                    <h3 className="text-blue-700 text-lg font-bold mb-2">Portfolio Construction</h3>
+                    <h4 className="font-semibold mt-4 mb-1">Individual Investment Returns</h4>
+                    <p>Each investment <InlineMath math={String.raw`i`} /> generates a return <InlineMath math={String.raw`R_i`} /> sampled from the bounded Pareto distribution:</p>
+                    <BlockMath math={String.raw`R_i \sim \text{BoundedPareto}(\alpha, x_{\min}, x_{\max})`}/>
+                    <h4 className="font-semibold mt-4 mb-1">Portfolio Return Calculation</h4>
+                    <p>The total portfolio return is computed as:</p>
+                    <BlockMath math={String.raw`R_{\text{portfolio}} = \sum_{i=1}^{n} \frac{(R_i - x_{\min})}{n}`}/>
+                    <p>where the adjustment <InlineMath math={String.raw`(R_i - x_{\min})`} /> transforms the bounded Pareto samples to represent actual investment outcomes.</p>
+                    <h3 className="text-blue-700 text-lg font-bold mb-2">Monte Carlo Simulation</h3>
+                    <h4 className="font-semibold mt-4 mb-1">Simulation Process</h4>
+                    <p>For each of <InlineMath math={String.raw`N`} /> simulation runs:</p>
+                    <ol>
+                      <li>Generate <InlineMath math={String.raw`n`} /> independent samples from bounded Pareto distribution</li>
+                      <li>Calculate portfolio return using equation above</li>
+                      <li>Record outcome for statistical analysis</li>
                     </ol>
-                    <h3 className="text-blue-700 text-lg font-bold mb-2">Key Equations</h3>
-                    <ul className="list-disc pl-6 mb-6">
-                      <li><b>Pareto CDF:</b> <BlockMath math={"P(X > x) = (x_{min}/x)^{\\alpha}"} /></li>
-                      <li><b>Portfolio Return:</b> <BlockMath math={"R_{portfolio} = \\sum_{i=1}^N X_i"} /></li>
-                      <li><b>Mean Return:</b> <BlockMath math={"\\mu = E[R_{portfolio}]"} /></li>
-                      <li><b>Standard Deviation:</b> <BlockMath math={"\\sigma = std(R_{portfolio})"} /></li>
-                      <li><b>Quantiles:</b> <BlockMath math={"Q_p = \\text{Quantile at probability } p"} /></li>
+                    <h4 className="font-semibold mt-4 mb-1">Key Metrics</h4>
+                    <p>The simulation computes several probability metrics:</p>
+                    <BlockMath math={String.raw`P(\text{Loss}) = P(R_{\text{portfolio}} < 1.0)`}/>
+                    <BlockMath math={String.raw`P(\text{2x+}) = P(R_{\text{portfolio}} \geq 2.0)`}/>
+                    <BlockMath math={String.raw`P(\text{10x+}) = P(R_{\text{portfolio}} \geq 10.0)`}/>
+                    <p>And statistical measures:</p>
+                    <BlockMath math={String.raw`
+\mathbb{E}[R] = \frac{1}{N} \sum_{j=1}^{N} R_{\text{portfolio}}^{(j)}
+`}/>
+                    <BlockMath math={String.raw`
+\text{Var}[R] = \frac{1}{N-1} \sum_{j=1}^{N} (R_{\text{portfolio}}^{(j)} - \mathbb{E}[R])^2
+`}/>
+                    <h3 className="text-blue-700 text-lg font-bold mb-2">Economic Interpretation</h3>
+                    <h4 className="font-semibold mt-4 mb-1">Power Law Economics</h4>
+                    <ul>
+                      <li><b>Fat tail:</b> Small probability of extremely large returns</li>
+                      <li><b>Heavy concentration:</b> Few investments drive most returns</li>
+                      <li><b>Scale invariance:</b> Similar patterns across different investment stages</li>
                     </ul>
-                    <h3 className="text-blue-700 text-lg font-bold mb-2">Return Distribution by Size</h3>
-                    <p className="mb-6">This graph shows how the distribution of portfolio returns changes as the number of investments in the portfolio increases. Each curve represents the probability density of returns for a different portfolio size (e.g., 10, 25, 50, 100, 200, 500). As the portfolio size grows, the distribution typically becomes narrower and more centered, illustrating the effect of diversification in reducing risk and the impact of the power-law on portfolio outcomes.</p>
-                    <h3 className="text-blue-700 text-lg font-bold mb-2">Risk-Adjusted Performance (Sharpe Ratio)</h3>
-                    <p className="mb-6">The Sharpe Ratio is a measure of risk-adjusted return, calculated as (mean return - 1) divided by the standard deviation of returns. In this context, it shows how much excess return (over break-even) is achieved per unit of risk for different portfolio sizes. Higher Sharpe Ratios indicate better risk-adjusted performance. The graph helps you see how increasing the number of investments can improve the risk-return profile of a power-law portfolio.</p>
-                    <h3 className="text-blue-700 text-lg font-bold mb-2">Assumptions</h3>
-                    <ul className="list-disc pl-6 mb-6">
-                      <li>Investment returns are independent and identically distributed (i.i.d.).</li>
-                      <li>All capital is deployed equally across investments.</li>
-                      <li>The power-law exponent <InlineMath math={"\\alpha"} /> and bounds <InlineMath math={"x_{min}, x_{max}"} /> are user-defined.</li>
+                    <h4 className="font-semibold mt-4 mb-1">Portfolio Implications</h4>
+                    <ol>
+                      <li><b>Diversification necessity:</b> Large portfolios required to capture tail events</li>
+                      <li><b>Patience requirement:</b> Returns dominated by rare, high-impact outcomes</li>
+                      <li><b>Risk tolerance:</b> High probability of underperformance in short term</li>
+                    </ol>
+                    <h3 className="text-blue-700 text-lg font-bold mb-2">Model Validation</h3>
+                    <ul>
+                      <li>Historical venture capital return data</li>
+                      <li>Academic research on startup outcome distributions</li>
+                      <li>Empirical studies of power-law behavior in innovation economics</li>
                     </ul>
-                    <h3 className="text-blue-700 text-lg font-bold mb-2">Further Reading</h3>
-                    <ul className="list-disc pl-6 mb-2">
-                      <li><a href="https://arxiv.org/pdf/2303.11013" target="_blank" rel="noopener noreferrer" className="text-blue-700 underline">Venture Capital Portfolio Construction (Moonfire Ventures)</a></li>
+                    <h3 className="text-blue-700 text-lg font-bold mb-2">Limitations and Assumptions</h3>
+                    <h4 className="font-semibold mt-4 mb-1">Key Assumptions</h4>
+                    <ul>
+                      <li>Investment returns are independent and identically distributed</li>
+                      <li>No correlation between portfolio companies</li>
+                      <li>Constant market conditions across investment horizon</li>
+                      <li>No selection bias in investment opportunities</li>
                     </ul>
-                    <h3 className="text-blue-700 text-lg font-bold mb-2">Cumulative Distribution Function (CDF) & Break-even</h3>
-                    <p className="mb-6">The CDF graph shows, for each possible portfolio return, the probability that a simulation achieves a return less than or equal to that value. The X-axis represents the portfolio return (e.g., 1x, 2x), and the Y-axis shows the cumulative probability (from 0 to 1). The red vertical line at x = 1 marks the <b>break-even</b> point, where the portfolio returns exactly the invested capital. The height of the CDF at x = 1 tells you the probability of not breaking even (i.e., the chance of a loss). Values to the right of this line represent profitable outcomes, while values to the left indicate a loss.</p>
+                    <h4 className="font-semibold mt-4 mb-1">Model Limitations</h4>
+                    <ul>
+                      <li>Does not account for vintage year effects</li>
+                      <li>Ignores portfolio construction strategies</li>
+                      <li>Assumes static parameter values over time</li>
+                      <li>No modeling of follow-on investment decisions</li>
+                    </ul>
                   </div>
                 </div>
                 <DialogFooter className="bg-blue-50 rounded-b-lg p-4 flex justify-end">
@@ -970,7 +1167,7 @@ export function MoonfireSimulator({ layout }: { layout?: 'split' }) {
   return (
     <div className="max-w-3xl mx-auto py-8">
       <Card className="p-6 mb-6">
-        <h2 className="text-2xl font-bold mb-2">Moonfire Power-Law Portfolio Simulator</h2>
+        <h2 className="text-2xl font-bold mb-2">Power-Law Portfolio Simulator</h2>
         <p className="text-sm text-gray-500 mb-4">
           Based on <a href="https://arxiv.org/pdf/2303.11013" target="_blank" rel="noopener noreferrer" className="underline">Venture Capital Portfolio Construction</a> (Moonfire Ventures).
         </p>
@@ -1039,7 +1236,7 @@ export function MoonfireSimulator({ layout }: { layout?: 'split' }) {
           </div>
         </div>
         <Button onClick={handleRunSimulation} disabled={loading}>
-          {loading ? 'Simulating...' : 'Run Moonfire Simulation'}
+          {loading ? 'Simulating...' : 'Run Simulation'}
         </Button>
       </Card>
       {results && (
@@ -1050,10 +1247,10 @@ export function MoonfireSimulator({ layout }: { layout?: 'split' }) {
             <button className={`px-3 py-1 rounded ${tab === 'cdf' ? 'bg-blue-600 text-white' : 'bg-gray-100'}`} onClick={() => setTab('cdf')}>CDF</button>
             <button className={`px-3 py-1 rounded ${tab === 'sharpe' ? 'bg-blue-600 text-white' : 'bg-gray-100'}`} onClick={() => { setTab('sharpe'); if (!sizeAnalysis && !sizeLoading) handleSizeAnalysis(); }}>Risk-Adjusted Performance</button>
             <button className={`px-3 py-1 rounded ${tab === 'quant' ? 'bg-blue-600 text-white' : 'bg-gray-100'}`} onClick={() => setTab('quant')}>Quantiles</button>
-            <button className={`px-3 py-1 rounded ${tab === 'heat' ? 'bg-blue-600 text-white' : 'bg-gray-100'}`} onClick={() => setTab('heat')}>Investment Heatmap</button>
             <button className={`px-3 py-1 rounded ${tab === 'size' ? 'bg-blue-600 text-white' : 'bg-gray-100'}`} onClick={() => { setTab('size'); if (!sizeAnalysis && !sizeLoading) handleSizeAnalysis(); }}>Portfolio Size Analysis</button>
             <button className={`px-3 py-1 rounded ${tab === 'violin' ? 'bg-blue-600 text-white' : 'bg-gray-100'}`} onClick={() => { setTab('violin'); if (!sizeAnalysis && !sizeLoading) handleSizeAnalysis(); }}>Return Distribution by Size</button>
             <button className={`px-3 py-1 rounded ${tab === 'prob' ? 'bg-blue-600 text-white' : 'bg-gray-100'}`} onClick={() => { setTab('prob'); if (!sizeAnalysis && !sizeLoading) handleSizeAnalysis(); }}>Return Probabilities</button>
+            <button className={`px-3 py-1 rounded ${tab === 'batch' ? 'bg-blue-600 text-white' : 'bg-gray-100'}`} onClick={() => setTab('batch')}>Investment Batch Overview</button>
           </div>
           {tab === 'hist' && (
             <>
@@ -1111,7 +1308,7 @@ export function MoonfireSimulator({ layout }: { layout?: 'split' }) {
                   >Reset</button>
                 </div>
               )}
-              <div className="mb-4" style={{ width: '100%', height: 240 }}>
+              <div className="mb-1" style={{ width: '100%', height: 240 }}>
                 <ResponsiveContainer width="100%" height={240}>
                   <BarChart data={histData} margin={{ left: 80, right: 20, top: 20, bottom: 40 }}>
                     <CartesianGrid strokeDasharray="3 3" />
@@ -1119,11 +1316,11 @@ export function MoonfireSimulator({ layout }: { layout?: 'split' }) {
                       dataKey="binStart"
                       type="number"
                       domain={[(histXMin !== null ? histXMin : results?.minReturn) || 0, (histXMax !== null ? histXMax : results?.maxReturn) || 1]}
-                      label={{ value: 'Portfolio Return', position: 'bottom', offset: 20 }}
+                      // label={{ value: 'Portfolio Return', position: 'bottom', offset: 20 }}
                       tickFormatter={v => v.toFixed(2)}
                       allowDataOverflow={true}
                     />
-                    <YAxis label={{ value: 'Count', angle: -90, position: 'left', offset: 40 }} />
+                    <YAxis /*label={{ value: 'Count', angle: -90, position: 'left', offset: 40 }}*/ />
                     <Tooltip labelFormatter={(_, i) => histData[i]?.bin || ''} />
                     <Bar dataKey="count" fill="#60a5fa" name="Count" />
                     {showMean && <ReferenceLine x={results.mean} stroke="green" label="Mean" />}
@@ -1132,39 +1329,42 @@ export function MoonfireSimulator({ layout }: { layout?: 'split' }) {
                   </BarChart>
                 </ResponsiveContainer>
               </div>
+              <div className="text-xs text-gray-500 mb-4">X: Portfolio Return, Y: Count</div>
             </>
           )}
           {tab === 'loghist' && (
             <>
               <h3 className="text-lg font-semibold mb-2">Log-Scale Portfolio Return Distribution</h3>
-              <div className="mb-4" style={{ width: '100%', height: 240 }}>
+              <div className="mb-1" style={{ width: '100%', height: 240 }}>
                 <ResponsiveContainer width="100%" height={240}>
                   <BarChart data={logHistData} margin={{ left: 60, right: 20, top: 20, bottom: 30 }}>
                     <CartesianGrid strokeDasharray="3 3" />
-                    <XAxis dataKey="bin" interval={4} angle={-30} textAnchor="end" height={60} label={{ value: 'Log Portfolio Return', position: 'insideBottom', offset: -5 }} />
-                    <YAxis label={{ value: 'Count', angle: -90, position: 'insideLeft', offset: 20 }} />
+                    <XAxis dataKey="bin" interval={4} angle={-30} textAnchor="end" height={60} /*label={{ value: 'Log Portfolio Return', position: 'insideBottom', offset: -5 }}*/ />
+                    <YAxis /*label={{ value: 'Count', angle: -90, position: 'insideLeft', offset: 20 }}*/ />
                     <Tooltip />
                     <Bar dataKey="count" fill="#fbbf24" />
                   </BarChart>
                 </ResponsiveContainer>
               </div>
+              <div className="text-xs text-gray-500 mb-4">X: Log Portfolio Return, Y: Count</div>
             </>
           )}
           {tab === 'cdf' && (
             <>
               <h3 className="text-lg font-semibold mb-2">Cumulative Distribution Function (CDF)</h3>
-              <div className="mb-4" style={{ width: '100%', height: 240 }}>
+              <div className="mb-1" style={{ width: '100%', height: 240 }}>
                 <ResponsiveContainer width="100%" height={240}>
                   <ComposedChart data={cdfData} margin={{ left: 60, right: 20, top: 20, bottom: 30 }}>
                     <CartesianGrid strokeDasharray="3 3" />
-                    <XAxis dataKey="x" type="number" domain={['auto', 'auto']} label={{ value: 'Portfolio Return', position: 'insideBottom', offset: -5 }} />
-                    <YAxis dataKey="p" type="number" domain={[0, 1]} label={{ value: 'Cumulative Probability', angle: -90, position: 'insideLeft', offset: 20 }} />
+                    <XAxis dataKey="x" type="number" domain={['auto', 'auto']} /*label={{ value: 'Portfolio Return', position: 'insideBottom', offset: -5 }}*/ />
+                    <YAxis dataKey="p" type="number" domain={[0, 1]} /*label={{ value: 'Cumulative Probability', angle: -90, position: 'insideLeft', offset: 20 }}*/ />
                     <Tooltip />
                     <Line type="monotone" dataKey="p" stroke="#6366f1" dot={false} />
                     <ReferenceLine x={1} stroke="red" label="Break-even" />
                   </ComposedChart>
                 </ResponsiveContainer>
               </div>
+              <div className="text-xs text-gray-500 mb-4">X: Portfolio Return, Y: Cumulative Probability</div>
             </>
           )}
           {tab === 'sharpe' && (
@@ -1173,18 +1373,21 @@ export function MoonfireSimulator({ layout }: { layout?: 'split' }) {
               {sizeLoading ? (
                 <div className="py-8 text-center text-gray-500">Simulating...</div>
               ) : sizeAnalysis ? (
-                <div className="mb-4" style={{ width: '100%', height: 340 }}>
+                <>
+                  <div className="mb-1" style={{ width: '100%', height: 340 }}>
                   <ResponsiveContainer width="100%" height={340}>
                     <LineChart data={sizeAnalysis} margin={{ left: 60, right: 20, top: 20, bottom: 30 }}>
                       <CartesianGrid strokeDasharray="3 3" />
-                      <XAxis dataKey="size" label={{ value: 'Portfolio Size', position: 'insideBottom', offset: -5 }} />
-                      <YAxis label={{ value: 'Sharpe Ratio', angle: -90, position: 'insideLeft', offset: 20 }} />
+                        <XAxis dataKey="size" /*label={{ value: 'Portfolio Size', position: 'insideBottom', offset: -5 }}*/ />
+                        <YAxis /*label={{ value: 'Sharpe Ratio', angle: -90, position: 'insideLeft', offset: 20 }}*/ />
                       <Tooltip />
                       <Legend />
                       <Line type="monotone" dataKey="sharpe" stroke="#10b981" name="Sharpe Ratio" />
                     </LineChart>
                   </ResponsiveContainer>
                 </div>
+                  <div className="text-xs text-gray-500 mb-4">X: Portfolio Size, Y: Sharpe Ratio</div>
+                </>
               ) : (
                 <div className="py-8 text-center text-gray-500">Click the tab to run analysis.</div>
               )}
@@ -1193,51 +1396,18 @@ export function MoonfireSimulator({ layout }: { layout?: 'split' }) {
           {tab === 'quant' && (
             <>
               <h3 className="text-lg font-semibold mb-2">Portfolio Return Quantiles</h3>
-              <div className="mb-4" style={{ width: '100%', height: 240 }}>
+              <div className="mb-1" style={{ width: '100%', height: 240 }}>
                 <ResponsiveContainer width="100%" height={240}>
                   <BarChart data={quantileData} margin={{ left: 60, right: 20, top: 20, bottom: 30 }}>
                     <CartesianGrid strokeDasharray="3 3" />
-                    <XAxis dataKey="q" label={{ value: 'Quantile', position: 'insideBottom', offset: -5 }} />
-                    <YAxis label={{ value: 'Return', angle: -90, position: 'insideLeft', offset: 20 }} />
+                    <XAxis dataKey="q" /*label={{ value: 'Quantile', position: 'insideBottom', offset: -5 }}*/ />
+                    <YAxis /*label={{ value: 'Return', angle: -90, position: 'insideLeft', offset: 20 }}*/ />
                     <Tooltip />
                     <Bar dataKey="value" fill="#a78bfa" />
                   </BarChart>
                 </ResponsiveContainer>
               </div>
-            </>
-          )}
-          {tab === 'heat' && (
-            <>
-              <h3 className="text-lg font-semibold mb-2">Investment Returns Heatmap (First 50 Simulations)</h3>
-              <div className="mb-4 flex flex-col items-center">
-                {heatmapData && heatmapData.length > 0 ? (
-                  <svg width={Math.max(600, 8 * nInvestments)} height={16 * nSimulationsHeatmap + 40} style={{ background: '#fff', borderRadius: 8, border: '1px solid #eee' }}>
-                    {/* Color grid */}
-                    {heatmapData.map((row, i) =>
-                      row.map((val, j) => {
-                        // Viridis colormap using chroma-js
-                        const color = chroma.scale('viridis').domain([heatmapStats.min, heatmapStats.max])(val).hex();
-                        return <rect key={i + '-' + j} x={j * 8} y={i * 16} width={8} height={16} fill={color} />;
-                      })
-                    )}
-                    {/* Axes labels */}
-                    <text x={8} y={16 * nSimulationsHeatmap + 20} fontSize={12} fill="#444">Investment Index →</text>
-                    <text x={-60} y={16 * nSimulationsHeatmap / 2} fontSize={12} fill="#444" transform={`rotate(-90 0,${16 * nSimulationsHeatmap / 2})`}>Simulation Number ↓</text>
-                  </svg>
-                ) : (
-                  <div className="py-8 text-center text-gray-500">No data to display heatmap.</div>
-                )}
-                {/* Stats box */}
-                {heatmapStats && (
-                  <div className="mt-4 p-2 bg-white border rounded shadow text-xs font-mono text-left" style={{ minWidth: 220 }}>
-                    <div><b>Statistics:</b></div>
-                    <div>Mean: {heatmapStats.mean.toFixed(4)}x</div>
-                    <div>Max: {heatmapStats.max.toFixed(2)}x</div>
-                    <div>Min: {heatmapStats.min.toFixed(4)}x</div>
-                    <div>Std: {heatmapStats.std.toFixed(4)}</div>
-                  </div>
-                )}
-              </div>
+              <div className="text-xs text-gray-500 mb-4">X: Quantile, Y: Return</div>
             </>
           )}
           {tab === 'size' && (
@@ -1246,13 +1416,14 @@ export function MoonfireSimulator({ layout }: { layout?: 'split' }) {
               {sizeLoading ? (
                 <div className="py-8 text-center text-gray-500">Simulating...</div>
               ) : sizeAnalysis ? (
-                <div className="mb-4" style={{ width: '100%', height: 260 }}>
+                <>
+                  <div className="mb-1" style={{ width: '100%', height: 260 }}>
                   <ResponsiveContainer width="100%" height={260}>
                     <ComposedChart data={meanStdData}>
                       <CartesianGrid strokeDasharray="3 3" />
                       <XAxis dataKey="size" />
-                      <YAxis yAxisId="left" label={{ value: 'Mean', angle: -90, position: 'insideLeft' }} />
-                      <YAxis yAxisId="right" orientation="right" label={{ value: 'Std Dev', angle: 90, position: 'insideRight' }} />
+                        <YAxis yAxisId="left" /*label={{ value: 'Mean', angle: -90, position: 'insideLeft' }}*/ />
+                        <YAxis yAxisId="right" orientation="right" /*label={{ value: 'Std Dev', angle: 90, position: 'insideRight' }}*/ />
                       <Tooltip />
                       <Legend />
                       <Line yAxisId="left" type="monotone" dataKey="mean" stroke="#2563eb" name="Mean" />
@@ -1260,6 +1431,8 @@ export function MoonfireSimulator({ layout }: { layout?: 'split' }) {
                     </ComposedChart>
                   </ResponsiveContainer>
                 </div>
+                  <div className="text-xs text-gray-500 mb-4">X: Portfolio Size, Y (left): Mean, Y (right): Std Dev</div>
+                </>
               ) : (
                 <div className="py-8 text-center text-gray-500">Click the tab to run analysis.</div>
               )}
@@ -1271,68 +1444,50 @@ export function MoonfireSimulator({ layout }: { layout?: 'split' }) {
               {sizeLoading ? (
                 <div className="py-8 text-center text-gray-500">Simulating...</div>
               ) : sizeAnalysis ? (
-                <div className="mb-4 flex flex-col items-center">
-                  <svg width={480} height={260} style={{ background: '#f9fafb', borderRadius: 8, border: '1px solid #eee' }}>
-                    {/* Axes */}
-                    <line x1={40} x2={40} y1={20} y2={220} stroke="#888" strokeWidth={1} />
-                    <line x1={40} x2={440} y1={220} y2={220} stroke="#888" strokeWidth={1} />
-                    {/* Densities */}
-                    {violinData.map((d, idx) => {
-                      const kde = computeKDE(d.returns, 100);
-                      if (!kde.length) return null;
-                      const minX = Math.min(...kde.map(p => p.x));
-                      const maxX = Math.max(...kde.map(p => p.x));
-                      const maxY = Math.max(...kde.map(p => p.y));
-                      // Scales
-                      const x = (v: number) => 40 + ((v - minX) / (maxX - minX + 1e-8)) * 400;
-                      const y = (v: number) => 220 - (v / (maxY + 1e-8)) * 180;
-                      // Path
-                      const path = kde.map((p, i) => `${i === 0 ? 'M' : 'L'}${x(p.x)},${y(p.y)}`).join(' ');
-                      return (
-                        <path key={d.size} d={path} fill="none" stroke={DENSITY_COLORS[idx % DENSITY_COLORS.length]} strokeWidth={3} />
-                      );
-                    })}
-                    {/* X axis ticks/labels */}
-                    {Array.from({ length: 6 }, (_, i) => {
-                      const v = i / 5;
-                      const min = Math.min(...violinData.flatMap(d => d.returns));
-                      const max = Math.max(...violinData.flatMap(d => d.returns));
-                      const val = min + v * (max - min);
-                      return (
-                        <g key={i}>
-                          <line x1={40 + v * 400} x2={40 + v * 400} y1={220} y2={225} stroke="#888" />
-                          <text x={40 + v * 400} y={238} fontSize={11} textAnchor="middle" fill="#444">{val.toFixed(2)}</text>
-                        </g>
-                      );
-                    })}
-                    {/* Y axis ticks/labels */}
-                    {Array.from({ length: 5 }, (_, i) => {
-                      const v = i / 4;
-                      const maxY = Math.max(...violinData.map(d => {
-                        const kde = computeKDE(d.returns, 100);
-                        return Math.max(...kde.map(p => p.y));
-                      }));
-                      const val = v * maxY;
-                      return (
-                        <g key={i}>
-                          <line x1={35} x2={40} y1={220 - v * 180} y2={220 - v * 180} stroke="#888" />
-                          <text x={28} y={224 - v * 180} fontSize={11} textAnchor="end" fill="#444">{val.toFixed(2)}</text>
-                        </g>
-                      );
-                    })}
-                    {/* Axis labels */}
-                    <text x={240} y={255} textAnchor="middle" fontSize={13} fill="#444">Return</text>
-                    <text x={10} y={120} textAnchor="middle" fontSize={13} fill="#444" transform="rotate(-90 10,120)">Density</text>
-                  </svg>
-                  {/* Legend */}
-                  <div className="flex gap-4 mt-2">
-                    {violinData.map((d, idx) => (
-                      <div key={d.size} className="flex items-center gap-1">
-                        <span style={{ width: 16, height: 4, background: DENSITY_COLORS[idx % DENSITY_COLORS.length], display: 'inline-block', borderRadius: 2 }}></span>
-                        <span className="text-xs text-gray-700">Size {d.size}</span>
+                <div className="mb-1 flex flex-col items-center gap-8">
+                  {/* Render one chart per portfolio size */}
+                  {violinData.map((d, idx) => {
+                    const kde = computeKDE(d.returns, 200);
+                    // Find x domain where density > 0.01
+                    let minX = Infinity, maxX = -Infinity;
+                    kde.forEach(pt => {
+                      if (pt.y > 0.01) {
+                        if (pt.x < minX) minX = pt.x;
+                        if (pt.x > maxX) maxX = pt.x;
+                      }
+                    });
+                    const range = maxX - minX;
+                    minX = Math.max(0, minX - range * 0.05);
+                    maxX = maxX + range * 0.05;
+                    if (!isFinite(minX) || !isFinite(maxX) || minX >= maxX) {
+                      minX = 0;
+                      maxX = 1.5;
+                    }
+                    return (
+                      <div key={d.size} className="w-full">
+                        <div className="text-sm font-semibold mb-1">Portfolio Size: {d.size}</div>
+                        <ResponsiveContainer width="100%" height={180}>
+                          <LineChart data={kde} margin={{ left: 40, right: 20, top: 20, bottom: 20 }}>
+                            <CartesianGrid strokeDasharray="3 3" />
+                            <XAxis type="number" dataKey="x" domain={[minX, maxX]} />
+                            <YAxis type="number" />
+                            <Tooltip formatter={(v: number) => v.toFixed(4)} labelFormatter={(v: number) => v.toFixed(3)} />
+                            <Line
+                              dataKey="y"
+                              stroke={DENSITY_COLORS[idx % DENSITY_COLORS.length]}
+                              dot={false}
+                              isAnimationActive={false}
+                              type="monotone"
+                              strokeWidth={2.5}
+                              activeDot={{ r: 5 }}
+                            />
+                            <ReferenceLine x={1} stroke="#ef4444" strokeDasharray="4 2" strokeWidth={2} label={{ value: 'Break-even', position: 'top', fill: '#ef4444', fontSize: 12 }} />
+                          </LineChart>
+                        </ResponsiveContainer>
                       </div>
-                    ))}
-                  </div>
+                    );
+                  })}
+                  <div className="text-xs text-gray-500 mt-2 mb-4">X: Return, Y: Density</div>
                 </div>
               ) : (
                 <div className="py-8 text-center text-gray-500">Click the tab to run analysis.</div>
@@ -1345,13 +1500,14 @@ export function MoonfireSimulator({ layout }: { layout?: 'split' }) {
               {sizeLoading ? (
                 <div className="py-8 text-center text-gray-500">Simulating...</div>
               ) : sizeAnalysis ? (
-                <div className="mb-4" style={{ width: '100%', height: 340 }}>
+                <>
+                  <div className="mb-1" style={{ width: '100%', height: 340 }}>
                   <ResponsiveContainer width="100%" height={340}>
                     <LineChart data={probData} margin={{ left: 60, right: 20, top: 20, bottom: 30 }}>
                       <CartesianGrid strokeDasharray="3 3" />
-                      <XAxis dataKey="size" label={{ value: 'Portfolio Size', position: 'insideBottom', offset: -5 }} />
-                      <YAxis label={{ value: 'Probability', angle: -90, position: 'insideLeft', offset: 20 }} domain={[0, 1]} />
-                      <Tooltip formatter={v => (v * 100).toFixed(1) + '%'} />
+                        <XAxis dataKey="size" /*label={{ value: 'Portfolio Size', position: 'insideBottom', offset: -5 }}*/ />
+                        <YAxis /*label={{ value: 'Probability', angle: -90, position: 'insideLeft', offset: 20 }}*/ domain={[0, 1]} />
+                        <Tooltip formatter={v => (typeof v === 'number' ? (v * 100).toFixed(1) + '%' : v)} />
                       <Legend />
                       <Line type="monotone" dataKey="probLoss" stroke="#ef4444" name="Prob(Loss)" />
                       <Line type="monotone" dataKey="prob2x" stroke="#10b981" name="Prob(2x+)" />
@@ -1359,13 +1515,211 @@ export function MoonfireSimulator({ layout }: { layout?: 'split' }) {
                     </LineChart>
                   </ResponsiveContainer>
                 </div>
+                  <div className="text-xs text-gray-500 mb-4">X: Portfolio Size, Y: Probability</div>
+                </>
               ) : (
                 <div className="py-8 text-center text-gray-500">Click the tab to run analysis.</div>
               )}
             </>
           )}
+          {tab === 'batch' && results && results.allInvestmentReturns && results.allInvestmentReturns.length > 0 && (
+            (() => {
+              // Use batchSimIndex for navigation
+              const nSims = results.allInvestmentReturns.length;
+              const investment_returns = results.allInvestmentReturns[batchSimIndex] as number[];
+              const n_investments = investment_returns.length;
+              const per_investment_value = 1.0 / n_investments;
+              // Performance tiers
+              const points = investment_returns.map((ret: number, i: number) => {
+                let tier = 'Loss', color = '#ef4444';
+                if (ret < per_investment_value) {
+                  tier = 'Loss'; color = '#ef4444';
+                } else if (ret < 1.5 * per_investment_value) {
+                  tier = 'Break-even'; color = '#f59e42';
+                } else if (ret < 3 * per_investment_value) {
+                  tier = 'Modest'; color = '#fbbf24';
+                } else if (ret < 10 * per_investment_value) {
+                  tier = 'Good'; color = '#10b981';
+                } else {
+                  tier = 'Excellent'; color = '#166534';
+                }
+                // Size: log scale for better visualization
+                const size = 20 + 100 * Math.log10(Math.max(ret, 0.001) / per_investment_value + 1);
+                return { i, ret, tier, color, size };
+              });
+              // Reference lines
+              const refLines = [per_investment_value, 2 * per_investment_value, 5 * per_investment_value];
+              const refLineMeta = [
+                { color: '#ef4444', label: 'Break-even (1x)' },
+                { color: '#2563eb', label: '2x return' },
+                { color: '#22c55e', label: '5x return' },
+              ];
+              // Y scale: log if needed
+              const max_return = Math.max(...investment_returns);
+              const min_return = Math.min(...investment_returns.filter((x: number) => x > 0)) || 0.001;
+              const useLog = max_return / min_return > 100;
+              // Stats
+              const winners = investment_returns.filter((x: number) => x >= per_investment_value).length;
+              const losers = investment_returns.filter((x: number) => x < per_investment_value).length;
+              const top_return = Math.max(...investment_returns) / per_investment_value;
+              const avg_return = investment_returns.reduce((a: number, b: number) => a + b, 0) / n_investments / per_investment_value;
+              const total_portfolio = investment_returns.reduce((a: number, b: number) => a + b, 0);
+              // SVG layout
+              const svgWidth = 750;
+              const svgHeight = 420;
+              const leftPad = 60;
+              const rightPad = 28;
+              const topPad = 28;
+              const bottomPad = 56;
+              const plotWidth = svgWidth - leftPad - rightPad;
+              const plotHeight = svgHeight - topPad - bottomPad;
+              // X scale: fit all investments in plotWidth
+              const getX = (idx: number) => leftPad + (plotWidth * idx) / (n_investments - 1 || 1);
+              // Y scale
+              const getY = (ret: number) => {
+                if (useLog) {
+                  return topPad + plotHeight - plotHeight * (Math.log10(ret) - Math.log10(min_return)) / (Math.log10(max_return) - Math.log10(min_return));
+                } else {
+                  return topPad + plotHeight - plotHeight * (ret - min_return) / (max_return - min_return);
+                }
+              };
+              return (
+                <div className="mb-1 flex flex-col items-center w-full">
+                  {/* Navigation arrows */}
+                  <div className="flex items-center gap-2 mb-2">
+                    <button
+                      className="px-2 py-1 rounded bg-gray-100 border border-gray-300 hover:bg-gray-200 text-gray-700 disabled:opacity-50"
+                      onClick={() => setBatchSimIndex(i => Math.max(0, i - 1))}
+                      disabled={batchSimIndex === 0}
+                      aria-label="Previous simulation"
+                    >
+                      &#8592;
+                    </button>
+                    <span className="text-sm font-semibold">Simulation #{batchSimIndex + 1} of {nSims}</span>
+                    <button
+                      className="px-2 py-1 rounded bg-gray-100 border border-gray-300 hover:bg-gray-200 text-gray-700 disabled:opacity-50"
+                      onClick={() => setBatchSimIndex(i => Math.min(nSims - 1, i + 1))}
+                      disabled={batchSimIndex === nSims - 1}
+                      aria-label="Next simulation"
+                    >
+                      &#8594;
+                    </button>
+                  </div>
+                  <h3 className="text-lg font-semibold mb-2">Investment Batch Overview (Simulation #{batchSimIndex + 1})</h3>
+                  <div style={{ width: svgWidth, overflowX: 'auto' }}>
+                    <svg width={svgWidth} height={svgHeight} style={{ background: '#fff', borderRadius: 8, border: '1px solid #eee', display: 'block' }}>
+                      {/* Points */}
+                      {points.map((pt: { i: number; ret: number; tier: string; color: string; size: number }, idx: number) => {
+                        const x = getX(idx);
+                        const y = getY(pt.ret);
+                        return (
+                          <circle
+                            key={idx}
+                            cx={x}
+                            cy={y}
+                            r={pt.size / 20}
+                            fill={pt.color}
+                            stroke="#222"
+                            strokeWidth={0.5}
+                            opacity={0.7}
+                          >
+                            <title>
+                              {`Investment #${idx + 1}\nReturn: ${pt.ret.toFixed(4)}\nTier: ${pt.tier}`}
+                            </title>
+                          </circle>
+                        );
+                      })}
+                      {/* Axes */}
+                      <line x1={leftPad} x2={leftPad} y1={topPad} y2={svgHeight - bottomPad} stroke="#222" strokeWidth={1.5} />
+                      <line x1={leftPad} x2={svgWidth - rightPad} y1={svgHeight - bottomPad} y2={svgHeight - bottomPad} stroke="#222" strokeWidth={1.5} />
+                      {/* X ticks */}
+                      {[0, Math.floor(n_investments / 2), n_investments - 1].map((i: number) => {
+                        const x = getX(i);
+                        return (
+                          <g key={i}>
+                            <line x1={x} x2={x} y1={svgHeight - bottomPad} y2={svgHeight - bottomPad + 8} stroke="#222" />
+                            <text x={x} y={svgHeight - bottomPad + 22} fontSize={12} textAnchor="middle">{i + 1}</text>
+                          </g>
+                        );
+                      })}
+                      {/* Y ticks */}
+                      {(useLog
+                        ? [min_return, per_investment_value, 2 * per_investment_value, 5 * per_investment_value, max_return]
+                        : [min_return, per_investment_value, 2 * per_investment_value, 5 * per_investment_value, max_return]
+                      ).map((y: number, i: number) => {
+                        const yPos = getY(y);
+                        return (
+                          <g key={i}>
+                            <line x1={leftPad - 5} x2={leftPad} y1={yPos} y2={yPos} stroke="#222" />
+                            <text x={leftPad - 10} y={yPos + 4} fontSize={12} textAnchor="end">{y.toFixed(2)}</text>
+                          </g>
+                        );
+                      })}
+                      {/* Axis labels */}
+                      <text x={leftPad + plotWidth / 2} y={svgHeight - 18} fontSize={14} textAnchor="middle" fontWeight="bold">Investment Index</text>
+                      <text x={18} y={topPad + plotHeight / 2} fontSize={14} textAnchor="middle" fontWeight="bold" transform={`rotate(-90 18,${topPad + plotHeight / 2})`}>{useLog ? 'Return Value (log scale)' : 'Return Value'}</text>
+                    </svg>
+                  </div>
+                  {/* Summary statistics box */}
+                  <div className="mt-4 p-2 bg-white border rounded shadow text-xs font-mono text-left" style={{ minWidth: 220 }}>
+                    <div><b>Summary Statistics:</b></div>
+                    <div>Winners: {winners} ({((winners / n_investments) * 100).toFixed(1)}%)</div>
+                    <div>Losers: {losers} ({((losers / n_investments) * 100).toFixed(1)}%)</div>
+                    <div>Top Return: {top_return.toFixed(1)}x</div>
+                    <div>Avg Return: {avg_return.toFixed(2)}x</div>
+                    <div>Total Portfolio: {total_portfolio.toFixed(2)}x initial</div>
+                  </div>
+                  <div className="text-xs text-gray-500 mt-2 mb-4">X: Investment Index, Y: Return Value</div>
+                </div>
+              );
+            })()
+          )}
+          {/* Summary stats table (always visible) */}
+          <div className="mt-6 bg-gray-50 rounded-lg shadow-sm p-4 flex flex-col gap-2">
+            {/* 1st line: Mean, Std Deviation, Median */}
+            <div className="flex flex-wrap gap-6 items-center">
+              <TrendingUp className="w-5 h-5 text-blue-500 mr-2" />
+              <span className="text-sm text-gray-500">Mean</span><span className="text-xl font-semibold">{results.mean.toFixed(3)}</span>
+              <span className="text-sm text-gray-500 ml-6">Std Dev</span><span className="text-xl font-semibold">{results.std.toFixed(3)}</span>
+              <span className="text-sm text-gray-500 ml-6">Median</span><span className="text-xl font-semibold">{results.median.toFixed(3)}</span>
+            </div>
+            {/* 2nd line: Probability dropdown */}
+            <div className="flex flex-wrap gap-6 items-center">
+              <PercentCircle className="w-5 h-5 text-red-500 mr-2" />
+              <span className="text-sm text-gray-500">Probability</span>
+              <select
+                className="text-sm rounded border-gray-300 focus:ring-blue-500 focus:border-blue-500"
+                value={selectedProbability}
+                onChange={e => setSelectedProbability(e.target.value)}
+              >
+                {probabilityOptions.map(opt => (
+                  <option key={opt.value} value={opt.value}>{opt.label}</option>
+                ))}
+              </select>
+              <span className="text-xl font-semibold">
+                {((results[selectedProbability] ?? 0) * 100).toFixed(2)}%
+              </span>
+            </div>
+            {/* 3rd line: Max Return, Min Return */}
+            <div className="flex flex-wrap gap-6 items-center">
+              <ArrowDownCircle className="w-5 h-5 text-yellow-500 mr-2" />
+              <span className="text-sm text-gray-500">Max Return</span><span className="text-xl font-semibold">{results.maxReturn.toFixed(3)}</span>
+              <span className="text-sm text-gray-500 ml-6">Min Return</span><span className="text-xl font-semibold">{results.minReturn.toFixed(3)}</span>
+            </div>
+            {/* 4th line: Quantile, Execution Time */}
+            <div className="flex flex-wrap gap-6 items-center">
+              <BarChart2 className="w-5 h-5 text-gray-400 mr-2" />
+              <span className="text-sm text-gray-500">Quantile</span>
+              <select className="text-sm rounded border-gray-300 focus:ring-blue-500 focus:border-blue-500" value={selectedQuantile} onChange={e => setSelectedQuantile(e.target.value)}>{quantileOptions.map(opt => (<option key={opt.value} value={opt.value}>{opt.label}</option>))}</select>
+              <span className="text-xl font-semibold">{results[selectedQuantile]?.toFixed(3)}</span>
+              <span className="text-sm text-gray-500 ml-6">Execution Time</span><span className="text-xl font-semibold">{results.executionTime.toFixed(2)}s</span>
+            </div>
+          </div>
         </Card>
       )}
     </div>
   );
 }
+
+// Add a no-op handleSizeAnalysis to fix missing reference error
+function handleSizeAnalysis() {}
